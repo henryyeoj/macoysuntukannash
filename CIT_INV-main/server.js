@@ -25,7 +25,7 @@ const Item = mongoose.model('Item', new mongoose.Schema({
     category: String, 
     description: String,
     price: Number,
-    serials: [String], 
+    serials: [String], // Array to hold grouped serials
     status: String,
     borrower: String,
     returnDate: String
@@ -33,7 +33,7 @@ const Item = mongoose.model('Item', new mongoose.Schema({
 const Log = mongoose.model('Log', new mongoose.Schema({
     action: String,
     status: String,
-    user: String, // NEW: Added user tag to track digital receipts
+    user: String, 
     timestamp: String
 }));
 

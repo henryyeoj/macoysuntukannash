@@ -6,6 +6,7 @@
     <title>UA | CIT Secure Inventory</title>
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
@@ -47,7 +48,8 @@
                 <h2>CIT.Vault</h2>
             </div>
             <nav class="sidebar-nav">
-                <a href="#" class="nav-item active"><span>⌂</span> Home</a>
+                <a href="#" class="nav-item active" id="nav-home" onclick="switchNav('home')"><span>⌂</span> Home</a>
+                <a href="#" class="nav-item" id="nav-charts" onclick="switchNav('charts')"><span>📊</span> Charts</a>
             </nav>
             <div class="sidebar-footer">
                 <button id="btn-update-password" class="btn-sidebar admin-only hidden" onclick="openPasswordModal()">⚙️ Settings</button>
@@ -66,117 +68,129 @@
             </header>
 
             <div class="scroll-content">
-                <div id="admin-analytics" class="admin-only hidden">
-                    <h2 class="page-header">Recent activity</h2>
-                    <div class="metrics-grid">
-                        <div class="metric-card">
-                            <div class="metric-value" id="stat-total">0</div>
-                            <div class="metric-label">TOTAL EQUIPMENT</div>
+                
+                <div id="view-home">
+                    <div id="admin-analytics" class="admin-only hidden">
+                        <h2 class="page-header">Recent activity</h2>
+                        <div class="metrics-grid">
+                            <div class="metric-card">
+                                <div class="metric-value" id="stat-total">0</div>
+                                <div class="metric-label">TOTAL EQUIPMENT</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value" id="stat-borrowed" style="color:#f59e0b;">0</div>
+                                <div class="metric-label">BORROWED</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value" id="stat-pending" style="color:#6366f1;">0</div>
+                                <div class="metric-label">PENDING</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value" id="stat-penalties" style="color:#ef4444;">₱0</div>
+                                <div class="metric-label">OVERDUE FEES</div>
+                            </div>
                         </div>
-                        <div class="metric-card">
-                            <div class="metric-value" id="stat-borrowed" style="color:#f59e0b;">0</div>
-                            <div class="metric-label">BORROWED</div>
+                    </div>
+
+                    <div id="admin-controls" class="card admin-only hidden">
+                        <h2 class="card-header" style="margin-bottom: 25px; color: var(--cit-blue);">Add product</h2>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Name*</label>
+                                <input type="text" id="item-name" placeholder="Equipment Name">
+                            </div>
+                            <div class="form-group">
+                                <label>Item code (Serial)*</label>
+                                <input type="text" id="item-serial" placeholder="Serial Number">
+                            </div>
                         </div>
-                        <div class="metric-card">
-                            <div class="metric-value" id="stat-pending" style="color:#6366f1;">0</div>
-                            <div class="metric-label">PENDING</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Description*</label>
+                                <input type="text" id="item-description" placeholder="Product Description">
+                            </div>
+                            <div class="form-group">
+                                <label>Price (₱)*</label>
+                                <input type="number" id="item-price" placeholder="e.g. 1500">
+                            </div>
                         </div>
-                        <div class="metric-card">
-                            <div class="metric-value" id="stat-penalties" style="color:#ef4444;">₱0</div>
-                            <div class="metric-label">OVERDUE FEES</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Category*</label>
+                                <select id="item-category" style="width: 100%; padding: 14px 20px; border-radius: 10px; border: 1px solid var(--border); background: #f8fafc; font-family: inherit; font-size: 0.9rem; color: var(--text-main); appearance: auto;">
+                                    <option value="" disabled selected hidden></option>
+                                    <option value="End-User Devices">End-User Devices</option>
+                                    <option value="Infrastructure">Infrastructure</option>
+                                    <option value="Networking">Networking</option>
+                                    <option value="Peripherals">Peripherals</option>
+                                    <option value="AV Equipment">AV Equipment</option>
+                                    <option value="Others">Others</option>
+                                </select>
+                            </div>
+                            <div class="form-group"></div>
+                        </div>
+                        <div class="form-group" style="margin-top: 25px;">
+                             <button onclick="addNewItem()" class="btn-save">Save product</button>
+                        </div>
+                    </div>
+
+                    <div id="vault-section" class="card table-card">
+                        <div class="table-tools">
+                            <h2 class="card-header section-title" style="margin: 0; color: var(--cit-blue);">Secure Vault (3DES Protected)</h2>
+                            <div class="filter-pills">
+                                <button onclick="filterByStatus('All')" class="pill active">All</button>
+                                <button onclick="filterByStatus('Available')" class="pill">Available</button>
+                                <button id="btn-filter-pending" onclick="filterByStatus('Pending Approval')" class="pill admin-only hidden">Pending</button>
+                                <button id="btn-filter-borrowed" onclick="filterByStatus('Borrowed')" class="pill admin-only hidden">Borrowed</button>
+                                <button id="btn-filter-maintenance" onclick="filterByStatus('Maintenance')" class="pill admin-only hidden">Maintenance</button>
+                            </div>
+                        </div>
+                        <p id="admin-hint" style="font-size: 0.75rem; color: #64748b; margin-bottom: 15px;" class="admin-only hidden">Admin click the 3DES value to instantly decrypt the serial.</p>
+                        
+                        <div class="table-responsive">
+                            <table id="vault-table">
+                                <thead></thead>
+                                <tbody id="inventory-list"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="student-history-section" class="card table-card student-only hidden" style="margin-top: 25px;">
+                        <h2 class="card-header" style="margin-bottom: 15px; color: var(--cit-blue);">My Transaction History <span style="font-size: 0.7rem; color: #64748b; background: #e2e8f0; padding: 4px 10px; border-radius: 12px; font-weight: normal; margin-left: 10px;">Digital Receipt</span></h2>
+                        <div class="table-responsive">
+                            <table style="width: 100%; text-align: left; border-collapse: collapse;">
+                                <thead>
+                                    <tr style="border-bottom: 2px solid var(--border); color: var(--text-muted); font-size: 0.85rem;">
+                                        <th style="padding: 12px 15px;">Date & Time</th>
+                                        <th style="padding: 12px 15px;">Transaction Details</th>
+                                        <th style="padding: 12px 15px;">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="student-history-list">
+                                    </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="audit-log-container" class="card admin-only hidden" style="border-left: 5px solid #003366;">
+                        <h2 class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                            Security Audit Log
+                            <span style="font-size: 0.7rem; color: #10b981; background: #d1fae5; padding: 4px 10px; border-radius: 12px; font-weight: bold;">Live Monitoring</span>
+                        </h2>
+                        <div id="audit-list" class="log-viewer">
+                            <div style="color: #64748b;"> Initializing Secure Environment </div>
+                        </div>
+                    </div>
+                </div> <div id="view-charts" class="hidden">
+                    <div class="card table-card">
+                        <h2 class="card-header section-title" style="margin: 0; color: var(--cit-blue); margin-bottom: 20px;">Storage Category Distribution</h2>
+                        <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 20px;">This doughnut chart visualizes the total distribution of items securely stored in the laboratory.</p>
+                        <div style="position: relative; height: 400px; width: 100%;">
+                            <canvas id="categoryChart"></canvas>
                         </div>
                     </div>
                 </div>
 
-                <div id="admin-controls" class="card admin-only hidden">
-                    <h2 class="card-header" style="margin-bottom: 25px; color: var(--cit-blue);">Add product</h2>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Name*</label>
-                            <input type="text" id="item-name" placeholder="Equipment Name">
-                        </div>
-                        <div class="form-group">
-                            <label>Item code (Serial)*</label>
-                            <input type="text" id="item-serial" placeholder="Serial Number">
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Description*</label>
-                            <input type="text" id="item-description" placeholder="Product Description">
-                        </div>
-                        <div class="form-group">
-                            <label>Price (₱)*</label>
-                            <input type="number" id="item-price" placeholder="e.g. 1500">
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Category*</label>
-                            <select id="item-category" style="width: 100%; padding: 14px 20px; border-radius: 10px; border: 1px solid var(--border); background: #f8fafc; font-family: inherit; font-size: 0.9rem; color: var(--text-main); appearance: auto;">
-                                <option value="" disabled selected hidden></option>
-                                <option value="End-User Devices">End-User Devices</option>
-                                <option value="Infrastructure">Infrastructure</option>
-                                <option value="Networking">Networking</option>
-                                <option value="Peripherals">Peripherals</option>
-                                <option value="AV Equipment">AV Equipment</option>
-                                <option value="Others">Others</option>
-                            </select>
-                        </div>
-                        <div class="form-group"></div>
-                    </div>
-                    <div class="form-group" style="margin-top: 25px;">
-                         <button onclick="addNewItem()" class="btn-save">Save product</button>
-                    </div>
-                </div>
-
-                <div id="vault-section" class="card table-card">
-                    <div class="table-tools">
-                        <h2 class="card-header section-title" style="margin: 0; color: var(--cit-blue);">Secure Vault (3DES Protected)</h2>
-                        <div class="filter-pills">
-                            <button onclick="filterByStatus('All')" class="pill active">All</button>
-                            <button onclick="filterByStatus('Available')" class="pill">Available</button>
-                            <button id="btn-filter-pending" onclick="filterByStatus('Pending Approval')" class="pill admin-only hidden">Pending</button>
-                            <button id="btn-filter-borrowed" onclick="filterByStatus('Borrowed')" class="pill admin-only hidden">Borrowed</button>
-                            <button id="btn-filter-maintenance" onclick="filterByStatus('Maintenance')" class="pill admin-only hidden">Maintenance</button>
-                        </div>
-                    </div>
-                    <p id="admin-hint" style="font-size: 0.75rem; color: #64748b; margin-bottom: 15px;" class="admin-only hidden">Admin click the 3DES value to instantly decrypt the serial.</p>
-                    
-                    <div class="table-responsive">
-                        <table id="vault-table">
-                            <thead></thead>
-                            <tbody id="inventory-list"></tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <div id="student-history-section" class="card table-card student-only hidden" style="margin-top: 25px;">
-                    <h2 class="card-header" style="margin-bottom: 15px; color: var(--cit-blue);">My Transaction History <span style="font-size: 0.7rem; color: #64748b; background: #e2e8f0; padding: 4px 10px; border-radius: 12px; font-weight: normal; margin-left: 10px;">Digital Receipt</span></h2>
-                    <div class="table-responsive">
-                        <table style="width: 100%; text-align: left; border-collapse: collapse;">
-                            <thead>
-                                <tr style="border-bottom: 2px solid var(--border); color: var(--text-muted); font-size: 0.85rem;">
-                                    <th style="padding: 12px 15px;">Date & Time</th>
-                                    <th style="padding: 12px 15px;">Transaction Details</th>
-                                    <th style="padding: 12px 15px;">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody id="student-history-list">
-                                </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <div id="audit-log-container" class="card admin-only hidden" style="border-left: 5px solid #003366;">
-                    <h2 class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-                        Security Audit Log
-                        <span style="font-size: 0.7rem; color: #10b981; background: #d1fae5; padding: 4px 10px; border-radius: 12px; font-weight: bold;">Live Monitoring</span>
-                    </h2>
-                    <div id="audit-list" class="log-viewer">
-                        <div style="color: #64748b;"> Initializing Secure Environment </div>
-                    </div>
-                </div>
             </div>
         </main>
     </div>

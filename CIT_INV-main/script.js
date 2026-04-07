@@ -11,6 +11,7 @@ let lockoutEndTime = null;
 let vaultData = [];
 let auditLogs = [];
 let pendingBorrowId = null;
+let categoryChartInstance = null; // NEW: Tracks the chart
 
 // --- SEARCH & FILTER STATE ---
 let currentFilter = "All";
@@ -139,11 +140,9 @@ function setupUI(role, studentData = null) {
     
     const isAdmin = (role === 'admin');
     
-    // Toggle Admin Only Elements
     const adminElements = document.querySelectorAll('.admin-only');
     adminElements.forEach(el => el.classList.toggle('hidden', !isAdmin));
 
-    // Toggle Student Only Elements (like Transaction History)
     const studentElements = document.querySelectorAll('.student-only');
     studentElements.forEach(el => el.classList.toggle('hidden', isAdmin));
 
@@ -155,6 +154,9 @@ function setupUI(role, studentData = null) {
     document.getElementById('user-greeting').innerHTML = isAdmin
         ? "Admin Access Verified"
         : `Student: <span style="color: #10b981;">${studentData.name}</span>`;
+    
+    // Always default to home view on fresh load
+    switchNav('home');
     
     if (isAdmin) {
         renderAuditLogs();
@@ -168,6 +170,23 @@ function showSecurityAlert(msg) {
     document.getElementById('security-alert-message').innerText = msg;
     document.getElementById('security-alert').classList.remove('hidden');
 }
+
+// --- PAGE ROUTER ---
+function switchNav(view) {
+    // 1. Manage Active Button Colors
+    document.getElementById('nav-home').classList.remove('active');
+    document.getElementById('nav-charts').classList.remove('active');
+    document.getElementById(`nav-${view}`).classList.add('active');
+
+    // 2. Manage Visible Container
+    document.getElementById('view-home').classList.add('hidden');
+    document.getElementById('view-charts').classList.add('hidden');
+    document.getElementById(`view-${view}`).classList.remove('hidden');
+
+    // 3. Render chart if navigating to it
+    if (view === 'charts') updateChart();
+}
+
 
 // --- 3DES ENGINE ---
 function xorStrings(t, k) {
@@ -244,9 +263,7 @@ async function addLog(action, status, relatedUser = 'admin') {
         const savedLog = await res.json();
         auditLogs.unshift(savedLog);
         
-        // Update Admin Logs if active
         if(sessionStorage.getItem('activeRole') === 'admin') renderAuditLogs();
-        // Update Student History if active
         if(sessionStorage.getItem('activeRole') === 'student') updateStudentHistory();
         
     } catch(err) { console.error(err); }
@@ -262,13 +279,11 @@ function renderAuditLogs() {
     }
 }
 
-// NEW: Renders purely the student's personal transactions
 function updateStudentHistory() {
     const list = document.getElementById('student-history-list');
     if (!list) return;
 
     const myName = sessionStorage.getItem('studentName');
-    // Filter the master audit log to only find actions tied to this exact student
     const myLogs = auditLogs.filter(log => log.user === myName);
     
     if(myLogs.length === 0) {
@@ -279,7 +294,7 @@ function updateStudentHistory() {
     list.innerHTML = myLogs.map(log => {
         let badgeClass = 'badge-available'; // green
         if (log.status === 'PENDING' || log.action.includes('Requested')) badgeClass = 'badge-pending';
-        if (log.status === 'DELETED' || log.action.includes('Rejected')) badgeClass = 'badge-maintenance'; // red/orange
+        if (log.status === 'DELETED' || log.action.includes('Rejected')) badgeClass = 'badge-maintenance'; 
         
         return `<tr style="border-bottom: 1px solid var(--border);">
             <td style="padding: 12px 15px;"><small style="color:#64748b;">${log.timestamp}</small></td>
@@ -289,7 +304,7 @@ function updateStudentHistory() {
     }).join('');
 }
 
-// --- SEARCH & ANALYTICS ---
+// --- SEARCH, FILTERS & CHARTS ---
 function handleSearch() {
     searchQuery = document.getElementById('search-input').value.toLowerCase();
     applyFilters();
@@ -319,6 +334,7 @@ function applyFilters() {
     });
 
     updateTable(filteredData);
+    updateChart(); // Updates the pie chart dynamic data automatically!
 }
 
 function updateAnalytics() {
@@ -338,6 +354,79 @@ function updateAnalytics() {
         }
     });
     document.getElementById('stat-penalties').innerText = `₱${totalPenalties}`;
+}
+
+// --- CHART GENERATION TOOL ---
+function updateChart() {
+    const ctx = document.getElementById('categoryChart');
+    if (!ctx) return;
+
+    // 1. Map and Count total items in the database by category
+    let categoryCounts = {};
+    let totalItems = 0;
+
+    vaultData.forEach(item => {
+        let cat = item.category || 'Others';
+        let qty = item.serials ? item.serials.length : 0;
+        if (qty > 0) {
+            categoryCounts[cat] = (categoryCounts[cat] || 0) + qty;
+            totalItems += qty;
+        }
+    });
+
+    const labels = Object.keys(categoryCounts);
+    const data = Object.values(categoryCounts);
+
+    // 2. Clear old chart before drawing new one
+    if (categoryChartInstance) {
+        categoryChartInstance.destroy();
+    }
+
+    // 3. Render new Chart if library is loaded
+    if (typeof Chart !== 'undefined') {
+        categoryChartInstance = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: data,
+                    backgroundColor: [
+                        '#3b82f6', // Blue
+                        '#10b981', // Green
+                        '#f59e0b', // Yellow
+                        '#ef4444', // Red
+                        '#8b5cf6', // Purple
+                        '#64748b'  // Gray
+                    ],
+                    borderWidth: 2,
+                    hoverOffset: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'right',
+                        labels: { font: { family: 'Inter', size: 14 } }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            // Automatically calculate percentage and layout
+                            label: function(context) {
+                                let label = context.label || '';
+                                if (label) label += ': ';
+                                let val = context.parsed;
+                                let pct = totalItems > 0 ? ((val / totalItems) * 100).toFixed(1) : 0;
+                                label += `${val} items (${pct}%)`;
+                                return label;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
 }
 
 // --- TABLE RENDERING ---
@@ -392,11 +481,11 @@ function updateTable(dataToDisplay, role = sessionStorage.getItem('activeRole'),
             } else {
                 let options = item.serials.map((s, idx) => {
                     let shortS = s.length > 15 ? s.substring(0, 15) + '...' : s;
-                    return `<option value="${idx}">${shortS}</option>`;
+                    return `<option value="${idx}">SN #${idx + 1}: ${shortS}</option>`;
                 }).join('');
                 serialsHtml = `<td>
-                    <select id="serial-select-${item._id}" style="width:120px; padding:4px; font-size:0.75rem; border-radius:4px; border:1px solid #cbd5e1;">${options}</select>
-                    <button onclick="unlockSelectedSerial('${item._id}')" class="btn-action-sm" style="background:#3b82f6; padding: 4px 8px; margin-top: 5px; display:block; width:120px;">Decrypt</button>
+                    <select id="serial-select-${item._id}" style="width:130px; padding:4px; font-size:0.75rem; border-radius:4px; border:1px solid #cbd5e1; margin-bottom:5px;">${options}</select>
+                    <button onclick="unlockSelectedSerial('${item._id}')" class="btn-action-sm" style="background:#3b82f6; padding: 4px; display:block; width:130px;">Decrypt Selected</button>
                 </td>`;
             }
 
@@ -524,12 +613,23 @@ async function acceptRequest(id) {
 async function rejectRequest(id) {
     let item = vaultData.find(i => i._id === id);
     let studentName = item.borrower;
-    item.status = 'Available'; item.borrower = ''; item.returnDate = '';
-    try {
+    
+    addLog(`Rejected request for ${item.equipment} by ${studentName}`, "DELETED", studentName);
+
+    const existingAvailableGroup = vaultData.find(i => i.equipment.toLowerCase() === item.equipment.toLowerCase() && i.status === 'Available' && i._id !== id);
+
+    if (existingAvailableGroup) {
+        existingAvailableGroup.serials.push(item.serials[0]);
+        await fetch(`${API_URL}/items/${existingAvailableGroup._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(existingAvailableGroup) });
+        await fetch(`${API_URL}/items/${id}`, { method: 'DELETE' });
+    } else {
+        item.status = 'Available'; item.borrower = ''; item.returnDate = '';
         await fetch(`${API_URL}/items/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
-        addLog(`Rejected request for ${item.equipment} by ${studentName}`, "DELETED", studentName);
-        applyFilters();
-    } catch(err) { console.error(err); }
+    }
+
+    const itemsRes = await fetch(`${API_URL}/items`);
+    vaultData = await itemsRes.json();
+    applyFilters();
 }
 
 async function removeItem(id) {
@@ -561,34 +661,90 @@ async function confirmBorrow() {
     if(!date) return alert("Select return date.");
     
     let item = vaultData.find(i => i._id === pendingBorrowId);
-    item.status = 'Pending Approval';
-    item.borrower = sessionStorage.getItem('studentName');
-    item.returnDate = date;
+    
+    if (item.serials.length > 1) {
+        const borrowedSerial = item.serials.pop(); 
+        
+        await fetch(`${API_URL}/items/${item._id}`, { 
+            method: 'PUT', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify(item) 
+        });
 
-    try {
-        await fetch(`${API_URL}/items/${item._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
-        addLog(`Requested by ${sessionStorage.getItem('studentName')}: ${item.equipment}`, "PENDING", sessionStorage.getItem('studentName'));
-        closeBorrowModal();
-        applyFilters();
-    } catch(err) { console.error(err); }
+        const newBorrowedItem = {
+            equipment: item.equipment,
+            category: item.category,
+            description: item.description,
+            price: item.price,
+            serials: [borrowedSerial],
+            status: 'Pending Approval',
+            borrower: sessionStorage.getItem('studentName'),
+            returnDate: date
+        };
+
+        await fetch(`${API_URL}/items`, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify(newBorrowedItem) 
+        });
+
+    } else {
+        item.status = 'Pending Approval';
+        item.borrower = sessionStorage.getItem('studentName');
+        item.returnDate = date;
+
+        await fetch(`${API_URL}/items/${item._id}`, { 
+            method: 'PUT', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify(item) 
+        });
+    }
+
+    addLog(`Requested 1x ${item.equipment}`, "PENDING", sessionStorage.getItem('studentName'));
+    closeBorrowModal();
+    
+    const itemsRes = await fetch(`${API_URL}/items`);
+    vaultData = await itemsRes.json();
+    applyFilters();
 }
 
 async function returnItem(id) {
-    let item = vaultData.find(i => i._id === id);
-    if (item.returnDate) {
+    let returnedItem = vaultData.find(i => i._id === id);
+    if (returnedItem.returnDate) {
         const today = new Date(); today.setHours(0, 0, 0, 0);
-        const returnD = new Date(item.returnDate + "T00:00:00");
+        const returnD = new Date(returnedItem.returnDate + "T00:00:00");
         const diffDays = Math.ceil((today - returnD) / (1000 * 60 * 60 * 24));
         if (diffDays > 0) alert(` OVERDUE ITEM DETECTED!\n\nPlease proceed to the Administrator to pay the penalty fee of ₱${diffDays * 50}.`);
     }
     
-    addLog(`Returned by ${item.borrower}: ${item.equipment}`, "SUCCESS", item.borrower);
-    item.status = 'Available'; item.borrower = ''; item.returnDate = '';
+    addLog(`Returned ${returnedItem.equipment}`, "SUCCESS", returnedItem.borrower);
     
-    try {
-        await fetch(`${API_URL}/items/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
-        applyFilters();
-    } catch(err) { console.error(err); }
+    const existingAvailableGroup = vaultData.find(i => i.equipment.toLowerCase() === returnedItem.equipment.toLowerCase() && i.status === 'Available' && i._id !== id);
+
+    if (existingAvailableGroup) {
+        existingAvailableGroup.serials.push(returnedItem.serials[0]);
+        
+        await fetch(`${API_URL}/items/${existingAvailableGroup._id}`, { 
+            method: 'PUT', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify(existingAvailableGroup) 
+        });
+        
+        await fetch(`${API_URL}/items/${id}`, { method: 'DELETE' });
+    } else {
+        returnedItem.status = 'Available'; 
+        returnedItem.borrower = ''; 
+        returnedItem.returnDate = '';
+        await fetch(`${API_URL}/items/${id}`, { 
+            method: 'PUT', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify(returnedItem) 
+        });
+    }
+
+    const itemsRes = await fetch(`${API_URL}/items`);
+    vaultData = await itemsRes.json();
+    applyFilters();
 }
 
 // --- CONFIG SETTINGS ---
@@ -644,17 +800,3 @@ function scrollToTop() {
         behavior: 'smooth' 
     });
 }
-
-// --- SIDEBAR INTERACTIVITY ---
-document.addEventListener('DOMContentLoaded', () => {
-    const navItems = document.querySelectorAll('.nav-item');
-    
-    navItems.forEach(item => {
-        item.addEventListener('click', function() {
-            // Remove active class from all links
-            navItems.forEach(nav => nav.classList.remove('active'));
-            // Add active class to the clicked link
-            this.classList.add('active');
-        });
-    });
-});
