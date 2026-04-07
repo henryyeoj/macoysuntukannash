@@ -77,7 +77,6 @@ body {
 .btn-secondary { background: #f8fafc; color: var(--cit-blue); border: 2px solid var(--cit-blue); width: 100%; }
 .btn-danger { background: #ef4444; color: white; }
 
-/* FIX: Smaller Save Product Button */
 .btn-save { 
     background: var(--cit-blue); 
     color: white; 
@@ -144,10 +143,17 @@ body {
 .pill { background: #f1f5f9; border: none; padding: 8px 20px; border-radius: 30px; font-size: 0.85rem; font-weight: 600; cursor: pointer; color: var(--text-muted); }
 .pill.active { background: var(--cit-blue); color: white; }
 
-.table-responsive { overflow-x: auto; width: 100%; }
-table { width: 100%; border-collapse: collapse; min-width: 600px; }
-th { text-align: left; font-size: 0.75rem; color: var(--text-muted); padding: 15px; border-bottom: 2px solid var(--light-gray); }
-td { padding: 15px; border-bottom: 1px solid var(--light-gray); font-size: 0.9rem; }
+.table-responsive { overflow-x: auto; width: 100%; display: block; }
+table { width: 100%; border-collapse: collapse; min-width: 900px; table-layout: auto; }
+th { text-align: left; font-size: 0.75rem; color: var(--text-muted); padding: 15px; border-bottom: 2px solid var(--light-gray); white-space: nowrap; }
+td { padding: 15px; border-bottom: 1px solid var(--light-gray); font-size: 0.9rem; vertical-align: middle; }
+
+/* NEW: Enforce word wrap on the encrypted serial to prevent layout breakage */
+.serial-cell {
+    max-width: 200px;
+    word-break: break-all;
+    white-space: normal;
+}
 
 .btn-action-sm { background: #f59e0b; color: white; padding: 8px 16px; border-radius: 8px; margin-right: 5px; font-size: 0.8rem; }
 .btn-delete-row { background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 8px 16px; border-radius: 8px; font-size: 0.8rem; }

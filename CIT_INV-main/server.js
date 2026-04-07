@@ -12,7 +12,6 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname))); 
 
 // --- DATABASE CONNECTION ---
-// Updated to the correct UA-CITINV cluster and added /cit_vault database target
 const dbURI = 'mongodb+srv://admin:admin@ua-citinv.k3it38i.mongodb.net/cit_vault?appName=UA-CITINV';
 
 mongoose.connect(dbURI)
@@ -23,10 +22,10 @@ mongoose.connect(dbURI)
 const Config = mongoose.model('Config', new mongoose.Schema({ pin: String }));
 const Item = mongoose.model('Item', new mongoose.Schema({
     equipment: String,
-    category: String, // NEW: Added category field
+    category: String, 
     description: String,
     price: Number,
-    serials: [String],
+    serials: [String], 
     status: String,
     borrower: String,
     returnDate: String
@@ -34,6 +33,7 @@ const Item = mongoose.model('Item', new mongoose.Schema({
 const Log = mongoose.model('Log', new mongoose.Schema({
     action: String,
     status: String,
+    user: String, // NEW: Added user tag to track digital receipts
     timestamp: String
 }));
 
@@ -70,9 +70,8 @@ app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// --- PORT (For local testing only) ---
+// --- PORT ---
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server on port ${PORT}`));
 
-// CRITICAL: Export for Vercel's serverless engine
 module.exports = app;

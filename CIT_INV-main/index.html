@@ -114,6 +114,7 @@
                         <div class="form-group">
                             <label>Category*</label>
                             <select id="item-category" style="width: 100%; padding: 14px 20px; border-radius: 10px; border: 1px solid var(--border); background: #f8fafc; font-family: inherit; font-size: 0.9rem; color: var(--text-main); appearance: auto;">
+                                <option value="" disabled selected hidden></option>
                                 <option value="End-User Devices">End-User Devices</option>
                                 <option value="Infrastructure">Infrastructure</option>
                                 <option value="Networking">Networking</option>
@@ -146,6 +147,23 @@
                         <table id="vault-table">
                             <thead></thead>
                             <tbody id="inventory-list"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="student-history-section" class="card table-card student-only hidden" style="margin-top: 25px;">
+                    <h2 class="card-header" style="margin-bottom: 15px; color: var(--cit-blue);">My Transaction History <span style="font-size: 0.7rem; color: #64748b; background: #e2e8f0; padding: 4px 10px; border-radius: 12px; font-weight: normal; margin-left: 10px;">Digital Receipt</span></h2>
+                    <div class="table-responsive">
+                        <table style="width: 100%; text-align: left; border-collapse: collapse;">
+                            <thead>
+                                <tr style="border-bottom: 2px solid var(--border); color: var(--text-muted); font-size: 0.85rem;">
+                                    <th style="padding: 12px 15px;">Date & Time</th>
+                                    <th style="padding: 12px 15px;">Transaction Details</th>
+                                    <th style="padding: 12px 15px;">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="student-history-list">
+                                </tbody>
                         </table>
                     </div>
                 </div>

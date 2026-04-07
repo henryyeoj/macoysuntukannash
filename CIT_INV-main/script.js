@@ -51,8 +51,8 @@ function restoreSession(role) {
 }
 
 function logoutSession() {
+    addLog("User Logged Out", "SUCCESS", sessionStorage.getItem('studentName') || 'admin');
     sessionStorage.clear(); 
-    addLog("User Logged Out", "SUCCESS");
     location.reload(); 
 }
 
@@ -84,7 +84,7 @@ function checkAdminLogin() {
     if (entered === currentPassword) {
         failedLoginAttempts = 0;
         sessionStorage.setItem('activeRole', 'admin');
-        addLog("Administrator Login Verified", "SUCCESS");
+        addLog("Administrator Login Verified", "SUCCESS", "admin");
         setupUI('admin');
     } else {
         failedLoginAttempts++;
@@ -92,11 +92,11 @@ function checkAdminLogin() {
         if (failedLoginAttempts >= MAX_ATTEMPTS) {
             lockoutEndTime = Date.now() + 30000; 
             failedLoginAttempts = 0; 
-            addLog("BRUTE FORCE DETECTED: Admin Lockout Triggered", "SECURITY ALERT");
+            addLog("BRUTE FORCE DETECTED: Admin Lockout Triggered", "SECURITY ALERT", "system");
             showSecurityAlert("MAXIMUM ATTEMPTS EXCEEDED. SYSTEM LOCKED FOR 30 SECONDS.");
             startLockoutTimer();
         } else {
-            addLog(`Failed Admin Entry Attempt (${failedLoginAttempts}/${MAX_ATTEMPTS})`, "SECURITY ALERT");
+            addLog(`Failed Admin Entry Attempt (${failedLoginAttempts}/${MAX_ATTEMPTS})`, "SECURITY ALERT", "system");
             showSecurityAlert(`Incorrect Password. ${MAX_ATTEMPTS - failedLoginAttempts} attempts remaining.`);
         }
     }
@@ -127,7 +127,7 @@ function checkStudentLogin() {
         sessionStorage.setItem('activeRole', 'student');
         sessionStorage.setItem('studentName', n);
         sessionStorage.setItem('studentId', sid);
-        addLog(`Student Login: ${n} (ID: ${sid})`, "SUCCESS");
+        addLog(`Student Login: ${n} (ID: ${sid})`, "SUCCESS", n);
         setupUI('student', { name: n, id: sid });
     } else { alert("Please enter both Name and Student ID."); }
 }
@@ -139,27 +139,28 @@ function setupUI(role, studentData = null) {
     
     const isAdmin = (role === 'admin');
     
-    // Hide original admin form components
-    document.getElementById('admin-controls').classList.toggle('hidden', !isAdmin);
-    document.getElementById('audit-log-container').classList.toggle('hidden', !isAdmin);
-    document.getElementById('admin-analytics').classList.toggle('hidden', !isAdmin);
-    
-    // Hide specific elements tagged for Admin only
+    // Toggle Admin Only Elements
     const adminElements = document.querySelectorAll('.admin-only');
     adminElements.forEach(el => el.classList.toggle('hidden', !isAdmin));
 
-    // Dynamically change the table title based on the role
+    // Toggle Student Only Elements (like Transaction History)
+    const studentElements = document.querySelectorAll('.student-only');
+    studentElements.forEach(el => el.classList.toggle('hidden', isAdmin));
+
     const tableTitle = document.querySelector('.table-tools .section-title');
     if (tableTitle) {
         tableTitle.innerText = isAdmin ? "Secure Vault (3DES Protected)" : "Available Equipment";
     }
 
-    // Set greeting
     document.getElementById('user-greeting').innerHTML = isAdmin
         ? "Admin Access Verified"
         : `Student: <span style="color: #10b981;">${studentData.name}</span>`;
     
-    if (isAdmin) renderAuditLogs();
+    if (isAdmin) {
+        renderAuditLogs();
+    } else {
+        updateStudentHistory();
+    }
     applyFilters(); 
 }
 
@@ -186,7 +187,6 @@ function runFeistel16(block, key) {
     return R + L;
 }
 
-// --- BULLETPROOF VISUALIZER FIX ---
 async function apply3DESWithVisuals(text) {
     const viz = document.getElementById('encryption-visualizer');
     const resultBox = document.getElementById('viz-result');
@@ -196,19 +196,16 @@ async function apply3DESWithVisuals(text) {
     
     if (viz) viz.classList.remove('hidden');
     
-    // Phase 1
     if (step1) step1.classList.add('active');
     let s1 = runFeistel16(text, SYSTEM_KEY);
     if (resultBox) resultBox.innerText = "K1 Applied: " + btoa(s1).substring(0,10) + "...";
     await new Promise(r => setTimeout(r, 600));
 
-    // Phase 2
     if (step2) step2.classList.add('active');
     let s2 = runFeistel16(s1, SYSTEM_KEY.split('').reverse().join(''));
     if (resultBox) resultBox.innerText = "K2 Inverse Applied: " + btoa(s2).substring(0,10) + "...";
     await new Promise(r => setTimeout(r, 600));
 
-    // Phase 3
     if (step3) step3.classList.add('active');
     let s3 = runFeistel16(s2, SYSTEM_KEY);
     const finalCipher = "3DES-" + btoa(s3);
@@ -217,7 +214,6 @@ async function apply3DESWithVisuals(text) {
 
     if (viz) viz.classList.add('hidden');
     
-    // Cleanup
     if (step1) step1.classList.remove('active');
     if (step2) step2.classList.remove('active');
     if (step3) step3.classList.remove('active');
@@ -235,10 +231,10 @@ function decrypt3DES(enc) {
     } catch (e) { return "Error"; }
 }
 
-// --- LOGGING ---
-async function addLog(action, status) {
+// --- LOGGING & HISTORY ---
+async function addLog(action, status, relatedUser = 'admin') {
     const timestamp = new Date().toLocaleString();
-    const newLog = { action, status, timestamp };
+    const newLog = { action, status, user: relatedUser, timestamp };
     try {
         const res = await fetch(`${API_URL}/logs`, {
             method: 'POST',
@@ -247,7 +243,12 @@ async function addLog(action, status) {
         });
         const savedLog = await res.json();
         auditLogs.unshift(savedLog);
-        renderAuditLogs();
+        
+        // Update Admin Logs if active
+        if(sessionStorage.getItem('activeRole') === 'admin') renderAuditLogs();
+        // Update Student History if active
+        if(sessionStorage.getItem('activeRole') === 'student') updateStudentHistory();
+        
     } catch(err) { console.error(err); }
 }
 
@@ -261,6 +262,33 @@ function renderAuditLogs() {
     }
 }
 
+// NEW: Renders purely the student's personal transactions
+function updateStudentHistory() {
+    const list = document.getElementById('student-history-list');
+    if (!list) return;
+
+    const myName = sessionStorage.getItem('studentName');
+    // Filter the master audit log to only find actions tied to this exact student
+    const myLogs = auditLogs.filter(log => log.user === myName);
+    
+    if(myLogs.length === 0) {
+        list.innerHTML = `<tr><td colspan="3" style="text-align:center; padding: 20px; color:#64748b;">No past transactions found.</td></tr>`;
+        return;
+    }
+    
+    list.innerHTML = myLogs.map(log => {
+        let badgeClass = 'badge-available'; // green
+        if (log.status === 'PENDING' || log.action.includes('Requested')) badgeClass = 'badge-pending';
+        if (log.status === 'DELETED' || log.action.includes('Rejected')) badgeClass = 'badge-maintenance'; // red/orange
+        
+        return `<tr style="border-bottom: 1px solid var(--border);">
+            <td style="padding: 12px 15px;"><small style="color:#64748b;">${log.timestamp}</small></td>
+            <td style="padding: 12px 15px;"><strong>${log.action}</strong></td>
+            <td style="padding: 12px 15px;"><span class="badge ${badgeClass}">${log.status}</span></td>
+        </tr>`;
+    }).join('');
+}
+
 // --- SEARCH & ANALYTICS ---
 function handleSearch() {
     searchQuery = document.getElementById('search-input').value.toLowerCase();
@@ -270,10 +298,8 @@ function handleSearch() {
 function filterByStatus(s) {
     currentFilter = s;
     
-    // Manage active state of pills (Fixed matching for "Pending")
     document.querySelectorAll('.filter-pills .pill').forEach(btn => {
         btn.classList.remove('active');
-        
         let btnText = btn.innerText.trim();
         if (btnText === s || (s === 'Pending Approval' && btnText === 'Pending')) {
             btn.classList.add('active');
@@ -296,9 +322,11 @@ function applyFilters() {
 }
 
 function updateAnalytics() {
-    document.getElementById('stat-total').innerText = vaultData.length;
-    document.getElementById('stat-borrowed').innerText = vaultData.filter(i => i.status === 'Borrowed').length;
-    document.getElementById('stat-pending').innerText = vaultData.filter(i => i.status === 'Pending Approval').length;
+    let totalItems = vaultData.reduce((sum, item) => sum + (item.serials ? item.serials.length : 0), 0);
+    document.getElementById('stat-total').innerText = totalItems;
+    
+    document.getElementById('stat-borrowed').innerText = vaultData.filter(i => i.status === 'Borrowed').reduce((sum, item) => sum + item.serials.length, 0);
+    document.getElementById('stat-pending').innerText = vaultData.filter(i => i.status === 'Pending Approval').reduce((sum, item) => sum + item.serials.length, 0);
 
     let totalPenalties = 0;
     vaultData.forEach(item => {
@@ -318,19 +346,18 @@ function updateTable(dataToDisplay, role = sessionStorage.getItem('activeRole'),
     const list = document.getElementById('inventory-list');
     const isAdmin = (role === 'admin');
 
-    // 1. Update the headers with Category
     thead.innerHTML = isAdmin ?
-        `<tr><th>#</th><th>Equipment</th><th>Category</th><th>Description</th><th>Price</th><th>Encrypted Serial (3DES)</th><th>Status</th><th>Action</th></tr>` :
-        `<tr><th>#</th><th>Equipment</th><th>Category</th><th>Description</th><th>Status</th><th>Action</th></tr>`;
+        `<tr><th>#</th><th>Equipment</th><th>Category</th><th>Description</th><th>Price</th><th>Qty</th><th>Encrypted Serials</th><th>Status</th><th>Action</th></tr>` :
+        `<tr><th>#</th><th>Equipment</th><th>Category</th><th>Description</th><th>Qty</th><th>Status</th><th>Action</th></tr>`;
 
     list.innerHTML = "";
     dataToDisplay.forEach((item, index) => {
         let row = `<tr><td>${index+1}</td><td><strong>${item.equipment}</strong></td>`;
         
-        // 2. Prepare the new column HTML (Category, Description, Price)
         let catHtml = `<td><span style="font-size: 0.8rem; background: #e2e8f0; padding: 4px 8px; border-radius: 6px; color: #475569; white-space: nowrap;">${item.category || 'Others'}</span></td>`;
         let descHtml = `<td>${item.description || '<span style="color:#cbd5e1;font-size:0.8rem;">No Description</span>'}</td>`;
         let priceHtml = `<td>₱${item.price || 0}</td>`;
+        let qtyHtml = `<td><span style="font-weight:bold; color:var(--cit-blue); background:#e2e8f0; padding:4px 10px; border-radius:20px;">${item.serials ? item.serials.length : 0}</span></td>`;
 
         let badgeClass = 'badge-available';
         if (item.status === 'Borrowed') badgeClass = 'badge-borrowed';
@@ -355,25 +382,39 @@ function updateTable(dataToDisplay, role = sessionStorage.getItem('activeRole'),
         if(item.status === 'Borrowed') statusHtml += penaltyText;
 
         if (isAdmin) {
-            let displaySerial = item.serials[0];
-            let shortSerial = displaySerial.length > 25 ? displaySerial.substring(0, 25) + '...' : displaySerial;
+            let serialsHtml = '';
+            if (!item.serials || item.serials.length === 0) {
+                serialsHtml = `<td><span style="color:#cbd5e1;">Empty</span></td>`;
+            } else if (item.serials.length === 1) {
+                let displaySerial = item.serials[0];
+                let shortSerial = displaySerial.length > 15 ? displaySerial.substring(0, 15) + '...' : displaySerial;
+                serialsHtml = `<td style="cursor:pointer; font-family:monospace; color:#3b82f6;" title="Click to Decrypt" onclick="unlockItem('${item._id}', 0)">${shortSerial}</td>`;
+            } else {
+                let options = item.serials.map((s, idx) => {
+                    let shortS = s.length > 15 ? s.substring(0, 15) + '...' : s;
+                    return `<option value="${idx}">${shortS}</option>`;
+                }).join('');
+                serialsHtml = `<td>
+                    <select id="serial-select-${item._id}" style="width:120px; padding:4px; font-size:0.75rem; border-radius:4px; border:1px solid #cbd5e1;">${options}</select>
+                    <button onclick="unlockSelectedSerial('${item._id}')" class="btn-action-sm" style="background:#3b82f6; padding: 4px 8px; margin-top: 5px; display:block; width:120px;">Decrypt</button>
+                </td>`;
+            }
+
             let actionHtml = '';
-            
             if (item.status === 'Pending Approval') {
                 actionHtml = `<button onclick="acceptRequest('${item._id}')" class="btn-action-sm" style="background:#10b981;">Accept</button>
                               <button onclick="rejectRequest('${item._id}')" class="btn-action-sm" style="background:#ef4444;">Reject</button>`;
             } else if (item.status === 'Available') {
                 actionHtml = `<button onclick="toggleMaintenance('${item._id}')" class="btn-action-sm" style="background:#f59e0b; color:white;">Set Maintenance</button>
-                              <button onclick="removeItem('${item._id}')" class="btn-delete-row" style="margin-top:5px;">Delete</button>`;
+                              <button onclick="removeItem('${item._id}')" class="btn-delete-row" style="margin-top:5px;">Delete Group</button>`;
             } else if (item.status === 'Maintenance') {
                 actionHtml = `<button onclick="toggleMaintenance('${item._id}')" class="btn-action-sm" style="background:#10b981;">Make Available</button>
-                              <button onclick="removeItem('${item._id}')" class="btn-delete-row" style="margin-top:5px;">Delete</button>`;
+                              <button onclick="removeItem('${item._id}')" class="btn-delete-row" style="margin-top:5px;">Delete Group</button>`;
             } else {
-                actionHtml = `<button onclick="removeItem('${item._id}')" class="btn-delete-row">Delete</button>`;
+                actionHtml = `<button onclick="removeItem('${item._id}')" class="btn-delete-row">Delete Group</button>`;
             }
             
-            // 3. Inject Category, Description, and Price into the Admin row
-            row += `${catHtml}${descHtml}${priceHtml}<td style="cursor:pointer; font-family:monospace; color:#3b82f6;" title="Click to Decrypt" onclick="unlockItem('${item._id}')">${shortSerial}</td>
+            row += `${catHtml}${descHtml}${priceHtml}${qtyHtml}${serialsHtml}
                     <td>${statusHtml}</td><td>${actionHtml}</td>`;
         } else {
             let btn = '';
@@ -386,8 +427,8 @@ function updateTable(dataToDisplay, role = sessionStorage.getItem('activeRole'),
             } else {
                 btn = `<span style="font-size: 0.8rem; color: #64748b;">Unavailable</span>`;
             }
-            // 4. Inject Category and Description into the Student row
-            row += `${catHtml}${descHtml}<td>${statusHtml}</td><td>${btn}</td>`;
+            
+            row += `${catHtml}${descHtml}${qtyHtml}<td>${statusHtml}</td><td>${btn}</td>`;
         }
         list.innerHTML += row + "</tr>";
     });
@@ -399,7 +440,7 @@ async function addNewItem() {
     const s = document.getElementById('item-serial').value.trim();
     const desc = document.getElementById('item-description').value.trim(); 
     const price = document.getElementById('item-price').value.trim();      
-    const cat = document.getElementById('item-category').value; // NEW: Get category value
+    const cat = document.getElementById('item-category').value; 
 
     if (!n || !s || !desc || !price || !cat) { 
         alert("Action Denied: Name, Serial, Description, Price, and Category are required."); 
@@ -407,36 +448,66 @@ async function addNewItem() {
     }
 
     const encryptedSerial = await apply3DESWithVisuals(s);
-    const newItem = { 
-        equipment: n, 
-        category: cat,         // NEW: Save category
-        description: desc,     
-        price: Number(price),  
-        serials: [encryptedSerial], 
-        status: 'Available' 
-    };
 
-    try {
-        const res = await fetch(`${API_URL}/items`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newItem) });
-        const savedItem = await res.json();
-        vaultData.push(savedItem);
-        addLog(`Registered: ${n} (3DES Protected)`, "SUCCESS");
-        
-        // Clear all fields and reset dropdown
-        document.getElementById('item-name').value = "";
-        document.getElementById('item-serial').value = "";
-        document.getElementById('item-description').value = ""; 
-        document.getElementById('item-price').value = "";       
-        document.getElementById('item-category').value = "End-User Devices"; 
-        
-        applyFilters(); 
-    } catch(err) { console.error(err); }
+    const existingItem = vaultData.find(i => i.equipment.toLowerCase() === n.toLowerCase() && i.status === 'Available');
+
+    if (existingItem) {
+        existingItem.serials.push(encryptedSerial);
+
+        try {
+            await fetch(`${API_URL}/items/${existingItem._id}`, { 
+                method: 'PUT', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify(existingItem) 
+            });
+            addLog(`Combined Serial into existing group: ${n}`, "SUCCESS", "admin");
+        } catch(err) { console.error(err); return; }
+
+    } else {
+        const newItem = { 
+            equipment: n, 
+            category: cat,         
+            description: desc,     
+            price: Number(price),  
+            serials: [encryptedSerial], 
+            status: 'Available' 
+        };
+
+        try {
+            await fetch(`${API_URL}/items`, { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify(newItem) 
+            });
+            addLog(`Registered New Item Group: ${n}`, "SUCCESS", "admin");
+        } catch(err) { console.error(err); return; }
+    }
+
+    const itemsRes = await fetch(`${API_URL}/items`);
+    vaultData = await itemsRes.json();
+
+    document.getElementById('item-name').value = "";
+    document.getElementById('item-serial').value = "";
+    document.getElementById('item-description').value = ""; 
+    document.getElementById('item-price').value = "";       
+    document.getElementById('item-category').value = ""; 
+    
+    applyFilters(); 
 }
 
-function unlockItem(id) {
+function unlockItem(id, index = 0) {
     const item = vaultData.find(i => i._id === id);
-    const decryptedSerial = decrypt3DES(item.serials[0]);
-    addLog(`Decrypted ${item.equipment}`, "SUCCESS");
+    const decryptedSerial = decrypt3DES(item.serials[index]);
+    addLog(`Decrypted ${item.equipment}`, "SUCCESS", "admin");
+    alert(`🔓 Original Serial: ${decryptedSerial}`);
+}
+
+function unlockSelectedSerial(id) {
+    const item = vaultData.find(i => i._id === id);
+    const selectEl = document.getElementById(`serial-select-${id}`);
+    const selectedIndex = selectEl.value;
+    const decryptedSerial = decrypt3DES(item.serials[selectedIndex]);
+    addLog(`Decrypted ${item.equipment} (Serial #${parseInt(selectedIndex) + 1})`, "SUCCESS", "admin");
     alert(`🔓 Original Serial: ${decryptedSerial}`);
 }
 
@@ -445,7 +516,7 @@ async function acceptRequest(id) {
     item.status = 'Borrowed';
     try {
         await fetch(`${API_URL}/items/${item._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
-        addLog(`Approved request for ${item.equipment} by ${item.borrower}`, "SUCCESS");
+        addLog(`Approved request for ${item.equipment} by ${item.borrower}`, "SUCCESS", item.borrower);
         applyFilters();
     } catch(err) { console.error(err); }
 }
@@ -456,13 +527,13 @@ async function rejectRequest(id) {
     item.status = 'Available'; item.borrower = ''; item.returnDate = '';
     try {
         await fetch(`${API_URL}/items/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
-        addLog(`Rejected request for ${item.equipment} by ${studentName}`, "DELETED");
+        addLog(`Rejected request for ${item.equipment} by ${studentName}`, "DELETED", studentName);
         applyFilters();
     } catch(err) { console.error(err); }
 }
 
 async function removeItem(id) {
-    if(confirm("Delete item?")) {
+    if(confirm("Delete this entire group of items?")) {
         await fetch(`${API_URL}/items/${id}`, { method: 'DELETE' });
         vaultData = vaultData.filter(i => i._id !== id);
         applyFilters();
@@ -475,7 +546,7 @@ async function toggleMaintenance(id) {
     
     try {
         await fetch(`${API_URL}/items/${item._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
-        addLog(`Status changed to ${item.status}: ${item.equipment}`, "SUCCESS");
+        addLog(`Status changed to ${item.status}: ${item.equipment}`, "SUCCESS", "admin");
         applyFilters();
     } catch(err) { console.error(err); }
 }
@@ -496,7 +567,7 @@ async function confirmBorrow() {
 
     try {
         await fetch(`${API_URL}/items/${item._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
-        addLog(`Requested by ${sessionStorage.getItem('studentName')}: ${item.equipment}`, "SUCCESS");
+        addLog(`Requested by ${sessionStorage.getItem('studentName')}: ${item.equipment}`, "PENDING", sessionStorage.getItem('studentName'));
         closeBorrowModal();
         applyFilters();
     } catch(err) { console.error(err); }
@@ -511,7 +582,7 @@ async function returnItem(id) {
         if (diffDays > 0) alert(` OVERDUE ITEM DETECTED!\n\nPlease proceed to the Administrator to pay the penalty fee of ₱${diffDays * 50}.`);
     }
     
-    addLog(`Returned by ${item.borrower}: ${item.equipment}`, "SUCCESS");
+    addLog(`Returned by ${item.borrower}: ${item.equipment}`, "SUCCESS", item.borrower);
     item.status = 'Available'; item.borrower = ''; item.returnDate = '';
     
     try {
@@ -537,11 +608,11 @@ async function saveNewPassword() {
             body: JSON.stringify({ pin: currentPassword }) 
         });
         
-        addLog("Admin Password Changed", "SUCCESS"); 
+        addLog("Admin Password Changed", "SUCCESS", "admin"); 
         alert("Password Updated!"); 
         closePasswordModal();
     } else {
-        addLog("Failed Password Update Attempt", "SECURITY ALERT");
+        addLog("Failed Password Update Attempt", "SECURITY ALERT", "admin");
         alert("Incorrect Old Password.");
     }
 }
