@@ -182,11 +182,21 @@
                         </div>
                     </div>
                 </div> <div id="view-charts" class="hidden">
-                    <div class="card table-card">
-                        <h2 class="card-header section-title" style="margin: 0; color: var(--cit-blue); margin-bottom: 20px;">Storage Category Distribution</h2>
-                        <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 20px;">This doughnut chart visualizes the total distribution of items securely stored in the laboratory.</p>
-                        <div style="position: relative; height: 400px; width: 100%;">
-                            <canvas id="categoryChart"></canvas>
+                    <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                        <div class="card table-card" style="flex: 1; min-width: 350px;">
+                            <h2 class="card-header section-title" style="margin: 0; color: var(--cit-blue); margin-bottom: 10px;">Category Distribution</h2>
+                            <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 20px;">Current inventory breakdown by category.</p>
+                            <div style="position: relative; height: 300px; width: 100%;">
+                                <canvas id="categoryChart"></canvas>
+                            </div>
+                        </div>
+
+                        <div class="card table-card" style="flex: 1; min-width: 350px;">
+                            <h2 class="card-header section-title" style="margin: 0; color: var(--cit-blue); margin-bottom: 10px;">Most Borrowed Equipment</h2>
+                            <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 20px;">Top 5 items based on historical borrow frequency.</p>
+                            <div style="position: relative; height: 300px; width: 100%;">
+                                <canvas id="popularChart"></canvas>
+                            </div>
                         </div>
                     </div>
                 </div>

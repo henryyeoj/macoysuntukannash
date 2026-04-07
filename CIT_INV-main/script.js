@@ -11,7 +11,8 @@ let lockoutEndTime = null;
 let vaultData = [];
 let auditLogs = [];
 let pendingBorrowId = null;
-let categoryChartInstance = null; // NEW: Tracks the chart
+let categoryChartInstance = null; 
+let popularChartInstance = null; // NEW: Tracks the Popularity Chart
 
 // --- SEARCH & FILTER STATE ---
 let currentFilter = "All";
@@ -173,17 +174,14 @@ function showSecurityAlert(msg) {
 
 // --- PAGE ROUTER ---
 function switchNav(view) {
-    // 1. Manage Active Button Colors
     document.getElementById('nav-home').classList.remove('active');
     document.getElementById('nav-charts').classList.remove('active');
     document.getElementById(`nav-${view}`).classList.add('active');
 
-    // 2. Manage Visible Container
     document.getElementById('view-home').classList.add('hidden');
     document.getElementById('view-charts').classList.add('hidden');
     document.getElementById(`view-${view}`).classList.remove('hidden');
 
-    // 3. Render chart if navigating to it
     if (view === 'charts') updateChart();
 }
 
@@ -334,7 +332,11 @@ function applyFilters() {
     });
 
     updateTable(filteredData);
-    updateChart(); // Updates the pie chart dynamic data automatically!
+    
+    // Only redraw chart if the chart page is visible
+    if(!document.getElementById('view-charts').classList.contains('hidden')) {
+        updateChart(); 
+    }
 }
 
 function updateAnalytics() {
@@ -358,68 +360,102 @@ function updateAnalytics() {
 
 // --- CHART GENERATION TOOL ---
 function updateChart() {
-    const ctx = document.getElementById('categoryChart');
-    if (!ctx) return;
+    if (typeof Chart === 'undefined') return;
 
-    // 1. Map and Count total items in the database by category
-    let categoryCounts = {};
-    let totalItems = 0;
+    // ----- 1. CATEGORY DOUGHNUT CHART -----
+    const ctxCat = document.getElementById('categoryChart');
+    if (ctxCat) {
+        let categoryCounts = {};
+        let totalItems = 0;
 
-    vaultData.forEach(item => {
-        let cat = item.category || 'Others';
-        let qty = item.serials ? item.serials.length : 0;
-        if (qty > 0) {
-            categoryCounts[cat] = (categoryCounts[cat] || 0) + qty;
-            totalItems += qty;
-        }
-    });
+        vaultData.forEach(item => {
+            let cat = item.category || 'Others';
+            let qty = item.serials ? item.serials.length : 0;
+            if (qty > 0) {
+                categoryCounts[cat] = (categoryCounts[cat] || 0) + qty;
+                totalItems += qty;
+            }
+        });
 
-    const labels = Object.keys(categoryCounts);
-    const data = Object.values(categoryCounts);
+        if (categoryChartInstance) categoryChartInstance.destroy();
 
-    // 2. Clear old chart before drawing new one
-    if (categoryChartInstance) {
-        categoryChartInstance.destroy();
-    }
-
-    // 3. Render new Chart if library is loaded
-    if (typeof Chart !== 'undefined') {
-        categoryChartInstance = new Chart(ctx, {
+        categoryChartInstance = new Chart(ctxCat, {
             type: 'doughnut',
             data: {
-                labels: labels,
+                labels: Object.keys(categoryCounts),
                 datasets: [{
-                    data: data,
-                    backgroundColor: [
-                        '#3b82f6', // Blue
-                        '#10b981', // Green
-                        '#f59e0b', // Yellow
-                        '#ef4444', // Red
-                        '#8b5cf6', // Purple
-                        '#64748b'  // Gray
-                    ],
-                    borderWidth: 2,
-                    hoverOffset: 4
+                    data: Object.values(categoryCounts),
+                    backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#64748b'],
+                    borderWidth: 2, hoverOffset: 4
                 }]
             },
             options: {
-                responsive: true,
-                maintainAspectRatio: false,
+                responsive: true, maintainAspectRatio: false,
                 plugins: {
-                    legend: {
-                        position: 'right',
-                        labels: { font: { family: 'Inter', size: 14 } }
-                    },
+                    legend: { position: 'right', labels: { font: { family: 'Inter', size: 12 } } },
                     tooltip: {
                         callbacks: {
-                            // Automatically calculate percentage and layout
                             label: function(context) {
                                 let label = context.label || '';
                                 if (label) label += ': ';
                                 let val = context.parsed;
                                 let pct = totalItems > 0 ? ((val / totalItems) * 100).toFixed(1) : 0;
-                                label += `${val} items (${pct}%)`;
-                                return label;
+                                return `${label}${val} items (${pct}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // ----- 2. POPULARITY BAR CHART -----
+    const ctxPop = document.getElementById('popularChart');
+    if (ctxPop) {
+        let borrowCounts = {};
+        
+        // Scan historical logs for borrow approvals to find what is truly popular
+        auditLogs.forEach(log => {
+            if (log.action.startsWith("Approved request for ")) {
+                // Log string format: "Approved request for Laptop by StudentName"
+                let parts = log.action.split(' by ');
+                parts.pop(); // Remove "StudentName"
+                let eqName = parts.join(' by ').replace("Approved request for ", "").trim();
+                borrowCounts[eqName] = (borrowCounts[eqName] || 0) + 1;
+            }
+        });
+
+        // Convert to array and get top 5
+        let sortedPopular = Object.keys(borrowCounts).map(name => {
+            return { name: name, count: borrowCounts[name] };
+        }).sort((a, b) => b.count - a.count).slice(0, 5);
+
+        if (popularChartInstance) popularChartInstance.destroy();
+
+        popularChartInstance = new Chart(ctxPop, {
+            type: 'bar',
+            data: {
+                labels: sortedPopular.map(i => i.name.length > 15 ? i.name.substring(0,15)+'...' : i.name),
+                datasets: [{
+                    label: 'Times Borrowed',
+                    data: sortedPopular.map(i => i.count),
+                    backgroundColor: '#3b82f6',
+                    borderRadius: 6
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true, ticks: { precision: 0 } } // Whole numbers only
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            title: function(context) {
+                                // Show full name on hover if truncated
+                                let idx = context[0].dataIndex;
+                                return sortedPopular[idx].name;
                             }
                         }
                     }
