@@ -30,14 +30,18 @@ const Item = mongoose.model('Item', new mongoose.Schema({
     borrower: String,
     returnDate: String,
     
-    // NEW: Asset Maintenance & Repair Fields
+    // Asset Maintenance Fields
     issueDescription: String,
     reportedBy: String,
     dateReported: String,
     repairStatus: String,
     sentTo: String,
     repairCost: Number,
-    maintenanceNotes: String
+    maintenanceNotes: String,
+
+    // NEW: Smart Cart Transaction Fields
+    transactionId: String,
+    purpose: String
 }));
 
 const Log = mongoose.model('Log', new mongoose.Schema({

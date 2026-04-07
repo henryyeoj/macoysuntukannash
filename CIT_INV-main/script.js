@@ -10,7 +10,7 @@ let lockoutEndTime = null;
 // --- APP STATE ---
 let vaultData = [];
 let auditLogs = [];
-let pendingBorrowId = null;
+let shoppingCart = []; // NEW: Array to hold bag items
 let pendingReportId = null;
 let pendingMaintenanceId = null;
 
@@ -165,6 +165,7 @@ function setupUI(role, studentData = null) {
         renderAuditLogs();
     } else {
         updateStudentHistory();
+        updateCartBadge();
     }
     applyFilters(); 
 }
@@ -180,15 +181,19 @@ function switchNav(view) {
     document.getElementById('nav-maintenance').classList.remove('active');
     document.getElementById('nav-charts').classList.remove('active');
     
-    document.getElementById(`nav-${view}`).classList.add('active');
+    if(document.getElementById('nav-requests')) document.getElementById('nav-requests').classList.remove('active');
+    
+    if(document.getElementById(`nav-${view}`)) document.getElementById(`nav-${view}`).classList.add('active');
 
     document.getElementById('view-home').classList.add('hidden');
     document.getElementById('view-maintenance').classList.add('hidden');
     document.getElementById('view-charts').classList.add('hidden');
+    document.getElementById('view-requests').classList.add('hidden');
     
     document.getElementById(`view-${view}`).classList.remove('hidden');
 
     if (view === 'charts') updateChart();
+    if (view === 'requests') renderRequestsView();
 }
 
 
@@ -308,7 +313,271 @@ function updateStudentHistory() {
     }).join('');
 }
 
-// --- SEARCH, FILTERS & ROUTING ---
+
+// --- SMART CART (STUDENT) ---
+function updateCartBadge() {
+    let totalItems = shoppingCart.reduce((sum, i) => sum + i.reqQty, 0);
+    document.getElementById('cart-count').innerText = totalItems;
+    document.getElementById('btn-cart').style.background = totalItems > 0 ? '#f59e0b' : 'var(--cit-blue)';
+}
+
+function addToCart(id) {
+    const item = vaultData.find(i => i._id === id);
+    if (!item || item.status !== 'Available') return;
+
+    let stock = item.serials.length;
+    let existingCartItem = shoppingCart.find(i => i.id === id);
+
+    if (existingCartItem) {
+        if (existingCartItem.reqQty < stock) {
+            existingCartItem.reqQty++;
+            updateCartBadge();
+            alert(`Increased ${item.equipment} quantity in bag.`);
+        } else {
+            alert(`Cannot add more. Only ${stock} available in stock.`);
+        }
+    } else {
+        shoppingCart.push({
+            id: id,
+            equipment: item.equipment,
+            category: item.category || 'Others',
+            maxQty: stock,
+            reqQty: 1
+        });
+        updateCartBadge();
+        alert(`Added ${item.equipment} to your Equipment Bag 🛒`);
+    }
+}
+
+function openCartModal() {
+    const list = document.getElementById('cart-list');
+    
+    if (shoppingCart.length === 0) {
+        list.innerHTML = `<tr><td colspan="4" style="text-align:center; padding: 20px; color:#64748b;">Your bag is completely empty.</td></tr>`;
+    } else {
+        list.innerHTML = shoppingCart.map((cartItem, index) => {
+            return `
+            <tr style="border-bottom: 1px solid var(--border);">
+                <td style="padding: 10px;"><strong>${cartItem.equipment}</strong></td>
+                <td style="padding: 10px;"><span style="font-size: 0.75rem; background: #e2e8f0; padding: 4px 6px; border-radius: 4px; color: #475569;">${cartItem.category}</span></td>
+                <td style="padding: 10px; text-align:center;">
+                    <input type="number" min="1" max="${cartItem.maxQty}" value="${cartItem.reqQty}" 
+                           onchange="updateCartQty('${cartItem.id}', this.value)" 
+                           style="width: 50px; padding: 5px; border-radius: 4px; border: 1px solid var(--border); text-align: center;">
+                </td>
+                <td style="padding: 10px; text-align:center;">
+                    <button onclick="removeFromCart('${cartItem.id}')" style="background: none; border: none; color: #ef4444; font-size: 1rem; cursor: pointer;" title="Remove">✖</button>
+                </td>
+            </tr>`;
+        }).join('');
+    }
+
+    document.getElementById('cart-total-badge').innerText = `${shoppingCart.reduce((s, i) => s + i.reqQty, 0)} Items`;
+    document.getElementById('cart-modal').classList.remove('hidden');
+}
+
+function closeCartModal() {
+    document.getElementById('cart-modal').classList.add('hidden');
+}
+
+function updateCartQty(id, newQty) {
+    let item = shoppingCart.find(i => i.id === id);
+    newQty = parseInt(newQty);
+    if (newQty > item.maxQty) newQty = item.maxQty;
+    if (newQty < 1) newQty = 1;
+    item.reqQty = newQty;
+    
+    document.getElementById('cart-total-badge').innerText = `${shoppingCart.reduce((s, i) => s + i.reqQty, 0)} Items`;
+    updateCartBadge();
+}
+
+function removeFromCart(id) {
+    shoppingCart = shoppingCart.filter(i => i.id !== id);
+    updateCartBadge();
+    openCartModal(); // Refresh view
+}
+
+function clearCart() {
+    shoppingCart = [];
+    updateCartBadge();
+    openCartModal();
+}
+
+async function checkoutCart() {
+    if (shoppingCart.length === 0) return alert('Your Equipment Bag is empty.');
+    
+    const returnDate = document.getElementById('cart-return-date').value;
+    if (!returnDate) return alert("Please select an Expected Return Date.");
+    
+    const purpose = document.getElementById('cart-purpose').value || "General Laboratory Work";
+    const studentName = sessionStorage.getItem('studentName');
+    
+    // Generate 1 master Transaction ID for this batch
+    const transactionId = "TXN-" + Math.floor(10000 + Math.random() * 90000); 
+
+    // Process each cart item
+    for (let cartItem of shoppingCart) {
+        let originalItem = vaultData.find(i => i._id === cartItem.id);
+        if (!originalItem) continue;
+
+        // Smart Split Logic
+        if (cartItem.reqQty < originalItem.serials.length) {
+            let poppedSerials = originalItem.serials.splice(0, cartItem.reqQty);
+            
+            // Save original (now has less stock)
+            await fetch(`${API_URL}/items/${originalItem._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(originalItem) });
+
+            // Create new Pending Record
+            const batchRequest = {
+                equipment: originalItem.equipment, category: originalItem.category, description: originalItem.description, price: originalItem.price,
+                serials: poppedSerials, status: 'Pending Approval', borrower: studentName, returnDate: returnDate,
+                transactionId: transactionId, purpose: purpose
+            };
+            await fetch(`${API_URL}/items`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(batchRequest) });
+
+        } else {
+            // They are borrowing ALL stock of this item
+            originalItem.status = 'Pending Approval';
+            originalItem.borrower = studentName;
+            originalItem.returnDate = returnDate;
+            originalItem.transactionId = transactionId;
+            originalItem.purpose = purpose;
+            await fetch(`${API_URL}/items/${originalItem._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(originalItem) });
+        }
+    }
+
+    addLog(`Requested Cart Checkout (${shoppingCart.length} items) - [${transactionId}]`, "PENDING", studentName);
+    
+    clearCart();
+    closeCartModal();
+    alert("Checkout Successful! Your request has been sent to the Administrator.");
+    
+    // Hard refresh state
+    const itemsRes = await fetch(`${API_URL}/items`);
+    vaultData = await itemsRes.json();
+    applyFilters();
+}
+
+
+// --- ADMIN: TRANSACTIONS / REQUESTS VIEW ---
+function renderRequestsView() {
+    const container = document.getElementById('requests-container');
+    const pendingData = vaultData.filter(i => i.status === 'Pending Approval');
+
+    if (pendingData.length === 0) {
+        container.innerHTML = `<div style="text-align:center; padding: 40px; color:#64748b; background: #f8fafc; border-radius: 12px; border: 1px dashed var(--border);">There are no pending borrow requests at this time.</div>`;
+        return;
+    }
+
+    // Group items by their Transaction ID
+    let groupedRequests = {};
+    pendingData.forEach(item => {
+        let tx = item.transactionId || 'LEGACY-REQUEST';
+        if (!groupedRequests[tx]) {
+            groupedRequests[tx] = {
+                transactionId: tx,
+                borrower: item.borrower,
+                returnDate: item.returnDate,
+                purpose: item.purpose || 'Not provided',
+                items: []
+            };
+        }
+        groupedRequests[tx].items.push(item);
+    });
+
+    let html = '';
+    for (let tx in groupedRequests) {
+        let group = groupedRequests[tx];
+        
+        let itemRows = group.items.map(i => {
+            return `<tr style="border-bottom: 1px solid var(--border);">
+                <td style="padding: 8px;"><strong>${i.equipment}</strong> <span style="color:#64748b; font-size:0.8rem;">(${i.category})</span></td>
+                <td style="padding: 8px; text-align:center;"><span style="font-weight:bold; color:var(--cit-blue); background:#e2e8f0; padding:4px 10px; border-radius:20px;">${i.serials.length}</span></td>
+            </tr>`;
+        }).join('');
+
+        html += `
+        <div style="border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: white; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+            <div style="background: #f8fafc; padding: 15px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h3 style="margin: 0; color: var(--cit-blue); font-size: 1.1rem;">${group.transactionId}</h3>
+                    <p style="margin: 5px 0 0 0; font-size: 0.85rem; color: #64748b;">
+                        <strong>Student:</strong> ${group.borrower} &nbsp;|&nbsp; 
+                        <strong>Return:</strong> ${group.returnDate} &nbsp;|&nbsp; 
+                        <strong>Purpose:</strong> ${group.purpose}
+                    </p>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="approveTransaction('${group.transactionId}')" class="btn-primary" style="background:#10b981; padding: 8px 15px; font-size: 0.85rem;">Approve All</button>
+                    <button onclick="rejectTransaction('${group.transactionId}')" class="btn-danger" style="padding: 8px 15px; font-size: 0.85rem;">Reject All</button>
+                </div>
+            </div>
+            <div style="padding: 15px 20px;">
+                <table style="width: 100%; text-align: left; border-collapse: collapse;">
+                    <thead>
+                        <tr style="border-bottom: 2px solid var(--border); color: #64748b; font-size: 0.8rem;">
+                            <th style="padding: 8px;">Requested Equipment</th>
+                            <th style="padding: 8px; text-align:center;">Requested Qty</th>
+                        </tr>
+                    </thead>
+                    <tbody>${itemRows}</tbody>
+                </table>
+            </div>
+        </div>`;
+    }
+
+    container.innerHTML = html;
+}
+
+async function approveTransaction(txId) {
+    let itemsToApprove = vaultData.filter(i => i.status === 'Pending Approval' && i.transactionId === txId);
+    let borrowerName = "";
+
+    for (let item of itemsToApprove) {
+        borrowerName = item.borrower;
+        item.status = 'Borrowed';
+        await fetch(`${API_URL}/items/${item._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
+    }
+
+    addLog(`Approved batch request [${txId}] for ${borrowerName}`, "SUCCESS", borrowerName);
+    
+    const itemsRes = await fetch(`${API_URL}/items`);
+    vaultData = await itemsRes.json();
+    applyFilters();
+}
+
+async function rejectTransaction(txId) {
+    if(!confirm("Are you sure you want to completely reject and cancel this entire request?")) return;
+
+    let itemsToReject = vaultData.filter(i => i.status === 'Pending Approval' && i.transactionId === txId);
+    let borrowerName = "";
+
+    for (let item of itemsToReject) {
+        borrowerName = item.borrower;
+        
+        // Smart Merge Strategy: Regroup with Vault
+        const existingAvailableGroup = vaultData.find(i => i.equipment.toLowerCase() === item.equipment.toLowerCase() && i.status === 'Available' && i._id !== item._id);
+        
+        if (existingAvailableGroup) {
+            existingAvailableGroup.serials.push(...item.serials);
+            await fetch(`${API_URL}/items/${existingAvailableGroup._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(existingAvailableGroup) });
+            await fetch(`${API_URL}/items/${item._id}`, { method: 'DELETE' });
+        } else {
+            item.status = 'Available'; item.borrower = ''; item.returnDate = ''; item.transactionId = ''; item.purpose = '';
+            await fetch(`${API_URL}/items/${item._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
+        }
+    }
+
+    addLog(`Rejected batch request [${txId}] by ${borrowerName}`, "DELETED", borrowerName);
+    
+    const itemsRes = await fetch(`${API_URL}/items`);
+    vaultData = await itemsRes.json();
+    applyFilters();
+}
+
+
+
+// --- SEARCH, FILTERS & GENERAL RENDERING ---
 function handleSearch() {
     searchQuery = document.getElementById('search-input').value.toLowerCase();
     applyFilters();
@@ -332,7 +601,6 @@ function applyFilters() {
     if(sessionStorage.getItem('activeRole') === 'admin') updateAnalytics();
 
     let filteredData = vaultData.filter(item => {
-        // Exclude Maintenance items from the main vault filter (unless 'All' is selected, wait no, let's keep Maintenance out of Vault 'All' completely to keep it clean)
         let isNotMaintenance = item.status !== 'Maintenance';
         let matchesStatus = currentFilter === 'All' ? isNotMaintenance : item.status === currentFilter;
         let matchesSearch = item.equipment.toLowerCase().includes(searchQuery);
@@ -342,9 +610,8 @@ function applyFilters() {
     updateTable(filteredData);
     updateMaintenanceTable(); 
     
-    if(!document.getElementById('view-charts').classList.contains('hidden')) {
-        updateChart(); 
-    }
+    if(!document.getElementById('view-charts').classList.contains('hidden')) updateChart(); 
+    if(!document.getElementById('view-requests').classList.contains('hidden')) renderRequestsView();
 }
 
 function updateAnalytics() {
@@ -365,10 +632,8 @@ function updateAnalytics() {
     });
     document.getElementById('stat-penalties').innerText = `₱${totalPenalties}`;
 
-    // Update Maintenance Metrics
     const maintItems = vaultData.filter(i => i.status === 'Maintenance');
     document.getElementById('stat-maint-total').innerText = maintItems.length;
-    
     let totalRepairCost = maintItems.reduce((sum, item) => sum + (item.repairCost || 0), 0);
     document.getElementById('stat-maint-cost').innerText = `₱${totalRepairCost}`;
 }
@@ -428,11 +693,11 @@ function updateChart() {
         let borrowCounts = {};
         
         auditLogs.forEach(log => {
-            if (log.action.startsWith("Approved request for ")) {
-                let parts = log.action.split(' by ');
-                parts.pop(); 
-                let eqName = parts.join(' by ').replace("Approved request for ", "").trim();
-                borrowCounts[eqName] = (borrowCounts[eqName] || 0) + 1;
+            if (log.action.startsWith("Approved request for ") || log.action.startsWith("Approved batch request ")) {
+                // Approximate counts based on logs
+                let logParts = log.action.split(' for ');
+                let detail = logParts.length > 1 ? logParts[1].split(' by ')[0] : log.action;
+                borrowCounts[detail] = (borrowCounts[detail] || 0) + 1;
             }
         });
 
@@ -455,19 +720,10 @@ function updateChart() {
             },
             options: {
                 responsive: true, maintainAspectRatio: false,
-                scales: {
-                    y: { beginAtZero: true, ticks: { precision: 0 } } 
-                },
+                scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
                 plugins: {
                     legend: { display: false },
-                    tooltip: {
-                        callbacks: {
-                            title: function(context) {
-                                let idx = context[0].dataIndex;
-                                return sortedPopular[idx].name;
-                            }
-                        }
-                    }
+                    tooltip: { callbacks: { title: function(context) { return sortedPopular[context[0].dataIndex].name; } } }
                 }
             }
         });
@@ -534,8 +790,7 @@ function updateTable(dataToDisplay, role = sessionStorage.getItem('activeRole'),
 
             let actionHtml = '';
             if (item.status === 'Pending Approval') {
-                actionHtml = `<button onclick="acceptRequest('${item._id}')" class="btn-action-sm" style="background:#10b981;">Accept</button>
-                              <button onclick="rejectRequest('${item._id}')" class="btn-action-sm" style="background:#ef4444;">Reject</button>`;
+                actionHtml = `<span style="font-size:0.8rem; color:#64748b;">Check Requests Tab</span>`;
             } else if (item.status === 'Available') {
                 actionHtml = `<button onclick="removeItem('${item._id}')" class="btn-delete-row" style="margin-bottom:5px;">Delete</button>
                               <button onclick="openReportModal('${item._id}')" class="btn-action-sm" style="background:#ef4444; color:white;">Report Issue</button>`;
@@ -548,7 +803,8 @@ function updateTable(dataToDisplay, role = sessionStorage.getItem('activeRole'),
         } else {
             let btn = '';
             if (item.status === 'Available') {
-                btn = `<button onclick="borrowItem('${item._id}')" class="btn-borrow" style="margin-bottom:5px;">Borrow</button>
+                // STUDENT CART BUTTON
+                btn = `<button onclick="addToCart('${item._id}')" class="btn-action-sm" style="background:var(--cit-blue); color:white; border:none; padding:6px 8px; border-radius:4px; cursor:pointer; width:100%; margin-bottom:5px; font-weight:bold;">🛒 Add to Bag</button>
                        <button onclick="openReportModal('${item._id}')" class="btn-action-sm" style="background:#ef4444; color:white; border:none; padding:4px 8px; border-radius:4px; cursor:pointer; width:100%;">Report Issue</button>`;
             } else if (item.status === 'Pending Approval' && item.borrower === studentData.name) {
                 btn = `<span style="font-size: 0.8rem; color: #6366f1; font-weight: bold;">Waiting...</span>`;
@@ -598,12 +854,11 @@ function updateMaintenanceTable() {
     }
 
     maintData.forEach(item => {
-        // Color code logic for Maintenance Status
         let badgeColor = '#64748b'; 
         let rs = item.repairStatus || 'Pending';
-        if (rs === 'Pending' || rs === 'Diagnosed') badgeColor = '#ef4444'; // Red
-        else if (rs === 'Sent for Repair' || rs === 'Repairing') badgeColor = '#f59e0b'; // Yellow
-        else if (rs === 'Fixed') badgeColor = '#10b981'; // Green
+        if (rs === 'Pending' || rs === 'Diagnosed') badgeColor = '#ef4444'; 
+        else if (rs === 'Sent for Repair' || rs === 'Repairing') badgeColor = '#f59e0b'; 
+        else if (rs === 'Fixed') badgeColor = '#10b981'; 
 
         let statusBadge = `<span style="background:${badgeColor}; color:white; padding:4px 8px; border-radius:12px; font-size:0.75rem; font-weight:bold;">${rs}</span>`;
         let returnText = item.estimatedReturnDate ? `<small style="color:#64748b;">${item.estimatedReturnDate}</small>` : `<small style="color:#cbd5e1;">Not Set</small>`;
@@ -712,9 +967,7 @@ async function submitBrokenReport() {
     let today = new Date().toLocaleDateString();
 
     if (item.serials.length > 1) {
-        // SMART SPLIT: Pull the broken serial out
         const brokenSerial = item.serials.splice(selectedIdx, 1)[0]; 
-        
         await fetch(`${API_URL}/items/${item._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
 
         const brokenItemObj = {
@@ -724,7 +977,6 @@ async function submitBrokenReport() {
 
         await fetch(`${API_URL}/items`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(brokenItemObj) });
     } else {
-        // Only 1 item, so convert the whole row
         item.status = 'Maintenance';
         item.repairStatus = 'Pending';
         item.issueDescription = desc;
@@ -784,8 +1036,6 @@ async function markAsFixed(id) {
     if(!confirm("Is this item fixed? It will be returned to the Available Vault.")) return;
 
     let repairedItem = vaultData.find(i => i._id === id);
-    
-    // SMART MERGE: Regroup with available items if possible
     const existingAvailableGroup = vaultData.find(i => i.equipment.toLowerCase() === repairedItem.equipment.toLowerCase() && i.status === 'Available' && i._id !== id);
 
     if (existingAvailableGroup) {
@@ -793,7 +1043,6 @@ async function markAsFixed(id) {
         await fetch(`${API_URL}/items/${existingAvailableGroup._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(existingAvailableGroup) });
         await fetch(`${API_URL}/items/${id}`, { method: 'DELETE' });
     } else {
-        // Clear maintenance fields and restore status
         repairedItem.status = 'Available'; 
         repairedItem.repairStatus = '';
         repairedItem.issueDescription = '';
@@ -813,8 +1062,7 @@ async function markAsFixed(id) {
     applyFilters();
 }
 
-
-// --- EXISTING UTILS ---
+// --- UTILS & RETURNS ---
 function unlockItem(id, index = 0) {
     const item = vaultData.find(i => i._id === id);
     const decryptedSerial = decrypt3DES(item.serials[index]);
@@ -831,73 +1079,12 @@ function unlockSelectedSerial(id) {
     alert(`🔓 Original Serial: ${decryptedSerial}`);
 }
 
-async function acceptRequest(id) {
-    let item = vaultData.find(i => i._id === id);
-    item.status = 'Borrowed';
-    try {
-        await fetch(`${API_URL}/items/${item._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
-        addLog(`Approved request for ${item.equipment} by ${item.borrower}`, "SUCCESS", item.borrower);
-        applyFilters();
-    } catch(err) { console.error(err); }
-}
-
-async function rejectRequest(id) {
-    let item = vaultData.find(i => i._id === id);
-    let studentName = item.borrower;
-    addLog(`Rejected request for ${item.equipment} by ${studentName}`, "DELETED", studentName);
-
-    const existingAvailableGroup = vaultData.find(i => i.equipment.toLowerCase() === item.equipment.toLowerCase() && i.status === 'Available' && i._id !== id);
-    if (existingAvailableGroup) {
-        existingAvailableGroup.serials.push(item.serials[0]);
-        await fetch(`${API_URL}/items/${existingAvailableGroup._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(existingAvailableGroup) });
-        await fetch(`${API_URL}/items/${id}`, { method: 'DELETE' });
-    } else {
-        item.status = 'Available'; item.borrower = ''; item.returnDate = '';
-        await fetch(`${API_URL}/items/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
-    }
-
-    const itemsRes = await fetch(`${API_URL}/items`);
-    vaultData = await itemsRes.json();
-    applyFilters();
-}
-
 async function removeItem(id) {
     if(confirm("Delete this entire group of items?")) {
         await fetch(`${API_URL}/items/${id}`, { method: 'DELETE' });
         vaultData = vaultData.filter(i => i._id !== id);
         applyFilters();
     }
-}
-
-function borrowItem(id) {
-    pendingBorrowId = id;
-    document.getElementById('borrow-modal').classList.remove('hidden');
-}
-
-async function confirmBorrow() {
-    const date = document.getElementById('return-date-field').value;
-    if(!date) return alert("Select return date.");
-    
-    let item = vaultData.find(i => i._id === pendingBorrowId);
-    
-    if (item.serials.length > 1) {
-        const borrowedSerial = item.serials.pop(); 
-        await fetch(`${API_URL}/items/${item._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
-        const newBorrowedItem = {
-            equipment: item.equipment, category: item.category, description: item.description, price: item.price,
-            serials: [borrowedSerial], status: 'Pending Approval', borrower: sessionStorage.getItem('studentName'), returnDate: date
-        };
-        await fetch(`${API_URL}/items`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newBorrowedItem) });
-    } else {
-        item.status = 'Pending Approval'; item.borrower = sessionStorage.getItem('studentName'); item.returnDate = date;
-        await fetch(`${API_URL}/items/${item._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
-    }
-
-    addLog(`Requested 1x ${item.equipment}`, "PENDING", sessionStorage.getItem('studentName'));
-    closeBorrowModal();
-    const itemsRes = await fetch(`${API_URL}/items`);
-    vaultData = await itemsRes.json();
-    applyFilters();
 }
 
 async function returnItem(id) {
@@ -919,6 +1106,7 @@ async function returnItem(id) {
         await fetch(`${API_URL}/items/${id}`, { method: 'DELETE' });
     } else {
         returnedItem.status = 'Available'; returnedItem.borrower = ''; returnedItem.returnDate = '';
+        returnedItem.transactionId = ''; returnedItem.purpose = '';
         await fetch(`${API_URL}/items/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(returnedItem) });
     }
 
@@ -945,7 +1133,6 @@ async function saveNewPassword() {
 function closeAlert() { document.getElementById('security-alert').classList.add('hidden'); }
 function openPasswordModal() { document.getElementById('password-modal').classList.remove('hidden'); }
 function closePasswordModal() { document.getElementById('password-modal').classList.add('hidden'); }
-function closeBorrowModal() { document.getElementById('borrow-modal').classList.add('hidden'); }
 function handleLoginEnter(e) { if(e.key === 'Enter') checkAdminLogin(); }
 function handleAddItemEnter(e) { if(e.key === 'Enter') addNewItem(); }
 function handleUpdatePasswordEnter(e) { if(e.key === 'Enter') { e.preventDefault(); saveNewPassword(); } }

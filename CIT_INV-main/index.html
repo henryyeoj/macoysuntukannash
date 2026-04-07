@@ -49,6 +49,7 @@
             </div>
             <nav class="sidebar-nav">
                 <a href="#" class="nav-item active" id="nav-home" onclick="switchNav('home')"><span>⌂</span> Home</a>
+                <a href="#" class="nav-item admin-only hidden" id="nav-requests" onclick="switchNav('requests')"><span>📥</span> Requests</a>
                 <a href="#" class="nav-item" id="nav-maintenance" onclick="switchNav('maintenance')"><span>🔧</span> Maintenance</a>
                 <a href="#" class="nav-item" id="nav-charts" onclick="switchNav('charts')"><span>📊</span> Charts</a>
             </nav>
@@ -64,6 +65,9 @@
                     <input type="text" id="search-input" placeholder="Search equipment..." onkeyup="handleSearch()">
                 </div>
                 <div class="user-pill">
+                    <button id="btn-cart" class="student-only hidden" onclick="openCartModal()" style="margin-right:15px; background:var(--cit-blue); color:white; border:none; padding:8px 15px; border-radius:20px; cursor:pointer; font-weight:bold; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                        🛒 Bag (<span id="cart-count">0</span>)
+                    </button>
                     <div id="user-greeting"></div>
                 </div>
             </header>
@@ -180,7 +184,18 @@
                             <div style="color: #64748b;"> Initializing Secure Environment </div>
                         </div>
                     </div>
-                </div> <div id="view-maintenance" class="hidden">
+                </div> 
+
+                <div id="view-requests" class="hidden">
+                    <div class="card table-card">
+                        <h2 class="card-header section-title" style="margin: 0; color: var(--cit-blue); margin-bottom: 20px;">Pending Borrow Transactions</h2>
+                        <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 20px;">Review and manage student cart checkouts.</p>
+                        <div id="requests-container" style="display: flex; flex-direction: column; gap: 20px;">
+                            </div>
+                    </div>
+                </div>
+
+                <div id="view-maintenance" class="hidden">
                     <div class="metrics-grid admin-only hidden" style="margin-bottom: 20px;">
                         <div class="metric-card">
                             <div class="metric-value" id="stat-maint-total">0</div>
@@ -200,14 +215,12 @@
                         
                         <div class="table-responsive">
                             <table id="maintenance-table" style="width: 100%; text-align: left; border-collapse: collapse;">
-                                <thead>
-                                    </thead>
+                                <thead></thead>
                                 <tbody id="maintenance-list"></tbody>
                             </table>
                         </div>
                     </div>
                 </div>
-
 
                 <div id="view-charts" class="hidden">
                     <div style="display: flex; gap: 20px; flex-wrap: wrap;">
@@ -243,6 +256,47 @@
         </div>
     </div>
 
+    <div id="cart-modal" class="overlay hidden">
+        <div class="modal-card" style="max-width: 600px;">
+            <h2 style="color: #003366; margin-bottom: 15px; display:flex; justify-content:space-between;">
+                <span>🛒 Equipment Bag</span>
+                <span id="cart-total-badge" style="font-size: 0.9rem; background: var(--cit-blue); color: white; padding: 4px 12px; border-radius: 20px;">0 Items</span>
+            </h2>
+            
+            <div class="table-responsive" style="max-height: 250px; overflow-y: auto; margin-bottom: 20px; border: 1px solid var(--border); border-radius: 8px;">
+                <table style="width: 100%; text-align: left; border-collapse: collapse;">
+                    <thead style="background: #f8fafc; position: sticky; top: 0;">
+                        <tr style="border-bottom: 2px solid var(--border); font-size: 0.85rem; color: #64748b;">
+                            <th style="padding: 10px;">Equipment</th>
+                            <th style="padding: 10px; text-align:center;">Qty</th>
+                            <th style="padding: 10px; text-align:center;">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cart-list">
+                        </tbody>
+                </table>
+            </div>
+
+            <div class="form-row" style="margin-bottom: 5px;">
+                <div class="form-group" style="flex: 1;">
+                    <label style="font-size: 0.85rem; font-weight: bold;">Expected Return Date*</label>
+                    <input type="date" id="cart-return-date" style="padding: 10px; width: 100%; border-radius: 8px; border: 1px solid var(--border);">
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label style="font-size: 0.85rem; font-weight: bold;">Borrow Purpose (Optional)</label>
+                    <input type="text" id="cart-purpose" placeholder="e.g. Thesis Experiment" style="padding: 10px; width: 100%; border-radius: 8px; border: 1px solid var(--border);">
+                </div>
+            </div>
+
+            <div style="display:flex; gap:10px; justify-content:center; margin-top:20px;">
+                <button class="btn-primary" style="flex: 2; background: #10b981;" onclick="checkoutCart()">Checkout Items</button>
+                <button class="btn-danger" style="flex: 1; background: #f59e0b;" onclick="clearCart()">Clear Bag</button>
+                <button class="btn-secondary" style="flex: 1; background: #64748b; color: white; border:none;" onclick="closeCartModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+
     <div id="password-modal" class="overlay hidden">
         <div class="modal-card">
             <h2 style="color: #003366;">Update Password</h2>
@@ -255,30 +309,15 @@
         </div>
     </div>
 
-    <div id="borrow-modal" class="overlay hidden">
-        <div class="modal-card">
-            <h2 style="color: #003366;">Borrow Request</h2>
-            <p style="margin-bottom: 10px; font-weight: bold; color: #64748b;">When will you return this?</p>
-            <input type="date" id="return-date-field" style="width: 100%;">
-            <div style="display:flex; gap:10px; justify-content:center; margin-top:20px;">
-                <button class="btn-primary" style="flex: 1;" onclick="confirmBorrow()">Submit Request</button>
-                <button class="btn-danger" style="flex: 1;" onclick="closeBorrowModal()">Cancel</button>
-            </div>
-        </div>
-    </div>
-
     <div id="report-modal" class="overlay hidden">
         <div class="modal-card">
             <h2 style="color: #ef4444;">Report Broken Equipment</h2>
             <p style="margin-bottom: 10px; font-size: 0.9rem; color: #64748b;">Please describe what is wrong with this item.</p>
-            
             <div id="report-serial-container" class="hidden" style="margin-bottom: 15px;">
                 <label style="font-weight: bold; font-size: 0.85rem;">Select Specific Item (Serial Number):</label>
                 <select id="report-serial-select" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border); margin-top: 5px;"></select>
             </div>
-
             <textarea id="report-issue-desc" placeholder="e.g. The screen is cracked and won't turn on..." style="width: 100%; height: 100px; padding: 10px; border-radius: 8px; border: 1px solid var(--border); font-family: inherit; resize: none;"></textarea>
-            
             <div style="display:flex; gap:10px; justify-content:center; margin-top:20px;">
                 <button class="btn-primary" style="flex: 1; background: #ef4444;" onclick="submitBrokenReport()">Submit Report</button>
                 <button class="btn-danger" style="flex: 1; background: #64748b;" onclick="closeReportModal()">Cancel</button>
@@ -290,7 +329,6 @@
         <div class="modal-card" style="max-width: 500px;">
             <h2 style="color: #003366; margin-bottom: 5px;">Update Repair Record</h2>
             <p id="edit-maint-eq-name" style="color: #64748b; font-weight: bold; margin-bottom: 15px; font-size: 0.9rem;"></p>
-            
             <div class="form-group" style="margin-bottom: 10px;">
                 <label style="font-size: 0.85rem; font-weight: 600;">Repair Status</label>
                 <select id="maint-status" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border);">
@@ -301,7 +339,6 @@
                     <option value="Fixed">Fixed (Ready to Return to Vault)</option>
                 </select>
             </div>
-
             <div style="display: flex; gap: 10px; margin-bottom: 10px;">
                 <div class="form-group" style="flex: 1;">
                     <label style="font-size: 0.85rem; font-weight: 600;">Sent To (Technician)</label>
@@ -312,17 +349,14 @@
                     <input type="number" id="maint-cost" placeholder="e.g. 500" style="padding: 10px;">
                 </div>
             </div>
-
             <div class="form-group" style="margin-bottom: 10px;">
                 <label style="font-size: 0.85rem; font-weight: 600;">Estimated Return Date</label>
                 <input type="date" id="maint-return-date" style="padding: 10px; width: 100%;">
             </div>
-
             <div class="form-group" style="margin-bottom: 15px;">
                 <label style="font-size: 0.85rem; font-weight: 600;">Maintenance Notes</label>
                 <textarea id="maint-notes" placeholder="Additional details..." style="width: 100%; height: 60px; padding: 10px; border-radius: 8px; border: 1px solid var(--border); font-family: inherit; resize: none;"></textarea>
             </div>
-
             <div style="display:flex; gap:10px; justify-content:center;">
                 <button class="btn-primary" style="flex: 1;" onclick="saveMaintenanceUpdate()">Save Updates</button>
                 <button class="btn-danger" style="flex: 1;" onclick="closeEditMaintModal()">Cancel</button>
