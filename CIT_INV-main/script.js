@@ -10,7 +10,7 @@ let lockoutEndTime = null;
 // --- APP STATE ---
 let vaultData = [];
 let auditLogs = [];
-let shoppingCart = []; // NEW: Array to hold bag items
+let shoppingCart = []; 
 let pendingReportId = null;
 let pendingMaintenanceId = null;
 
@@ -38,6 +38,10 @@ async function initApp() {
         if (activeRole) {
             restoreSession(activeRole);
         }
+
+        // Start the global live countdown clock & progress bars
+        startLiveCountdown();
+
     } catch (error) {
         console.error("⚠️ Make sure your Node backend is running!", error);
     }
@@ -175,12 +179,10 @@ function showSecurityAlert(msg) {
     document.getElementById('security-alert').classList.remove('hidden');
 }
 
-// --- PAGE ROUTER ---
 function switchNav(view) {
     document.getElementById('nav-home').classList.remove('active');
     document.getElementById('nav-maintenance').classList.remove('active');
     document.getElementById('nav-charts').classList.remove('active');
-    
     if(document.getElementById('nav-requests')) document.getElementById('nav-requests').classList.remove('active');
     
     if(document.getElementById(`nav-${view}`)) document.getElementById(`nav-${view}`).classList.add('active');
@@ -264,11 +266,7 @@ async function addLog(action, status, relatedUser = 'admin') {
     const timestamp = new Date().toLocaleString();
     const newLog = { action, status, user: relatedUser, timestamp };
     try {
-        const res = await fetch(`${API_URL}/logs`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newLog)
-        });
+        const res = await fetch(`${API_URL}/logs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newLog) });
         const savedLog = await res.json();
         auditLogs.unshift(savedLog);
         
@@ -314,6 +312,82 @@ function updateStudentHistory() {
 }
 
 
+// --- LIVE COUNTDOWN ENGINE (PENALTY WATCH + PROGRESS BAR) ---
+function startLiveCountdown() {
+    setInterval(() => {
+        // 1. Text Update & Row Flash Logic
+        document.querySelectorAll('.countdown-timer').forEach(el => {
+            const returnDateStr = el.getAttribute('data-date');
+            if (!returnDateStr) return;
+            
+            const targetTime = new Date(returnDateStr + "T23:59:59").getTime();
+            const now = new Date().getTime();
+            const diff = targetTime - now;
+            let tr = el.closest('tr');
+
+            if (diff < 0) {
+                // OVERDUE
+                const daysOverdue = Math.ceil(Math.abs(diff) / (1000 * 60 * 60 * 24));
+                const penalty = daysOverdue * 50;
+                el.innerHTML = `⏳ Overdue by ${daysOverdue} day(s) (₱${penalty} Penalty)`;
+                el.className = 'countdown-timer pulse-red';
+                el.style.color = '#ef4444';
+                el.style.fontWeight = 'bold';
+                if(tr) tr.classList.add('row-overdue');
+            } else {
+                // ACTIVE
+                if(tr) tr.classList.remove('row-overdue');
+                const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                const secs = Math.floor((diff % (1000 * 60)) / 1000);
+                
+                let timeText = `⏳ `;
+                if (days > 0) timeText += `${days}d `;
+                timeText += `${hours}h ${mins}m ${secs}s left`;
+
+                el.innerHTML = timeText;
+
+                if (diff < 12 * 60 * 60 * 1000) { 
+                    el.style.color = '#ef4444'; 
+                    el.className = 'countdown-timer';
+                } else if (diff < 2 * 24 * 60 * 60 * 1000) { 
+                    el.style.color = '#f59e0b'; 
+                    el.className = 'countdown-timer';
+                } else {
+                    el.style.color = '#10b981'; 
+                    el.className = 'countdown-timer';
+                }
+            }
+        });
+
+        // 2. Visual Horizontal Progress Bar Logic
+        document.querySelectorAll('.progress-fill').forEach(fill => {
+            const returnDateStr = fill.getAttribute('data-date');
+            if (!returnDateStr) return;
+            
+            const targetTime = new Date(returnDateStr + "T23:59:59").getTime();
+            const now = new Date().getTime();
+            const diff = targetTime - now;
+
+            // Base the full bar width on a standard 7-day total borrow time
+            const maxTime = 7 * 24 * 60 * 60 * 1000; 
+            let percent = (diff / maxTime) * 100;
+            if (percent > 100) percent = 100;
+            if (percent < 0) percent = 0;
+
+            fill.style.width = `${percent}%`;
+
+            if (diff < 0) fill.style.background = '#dc2626'; // Overdue Dark Red
+            else if (diff < 12 * 60 * 60 * 1000) fill.style.background = '#ef4444'; // Red
+            else if (diff < 2 * 24 * 60 * 60 * 1000) fill.style.background = '#f59e0b'; // Yellow
+            else fill.style.background = '#10b981'; // Green
+        });
+
+    }, 1000);
+}
+
+
 // --- SMART CART (STUDENT) ---
 function updateCartBadge() {
     let totalItems = shoppingCart.reduce((sum, i) => sum + i.reqQty, 0);
@@ -337,13 +411,7 @@ function addToCart(id) {
             alert(`Cannot add more. Only ${stock} available in stock.`);
         }
     } else {
-        shoppingCart.push({
-            id: id,
-            equipment: item.equipment,
-            category: item.category || 'Others',
-            maxQty: stock,
-            reqQty: 1
-        });
+        shoppingCart.push({ id: id, equipment: item.equipment, category: item.category || 'Others', maxQty: stock, reqQty: 1 });
         updateCartBadge();
         alert(`Added ${item.equipment} to your Equipment Bag 🛒`);
     }
@@ -355,7 +423,7 @@ function openCartModal() {
     if (shoppingCart.length === 0) {
         list.innerHTML = `<tr><td colspan="4" style="text-align:center; padding: 20px; color:#64748b;">Your bag is completely empty.</td></tr>`;
     } else {
-        list.innerHTML = shoppingCart.map((cartItem, index) => {
+        list.innerHTML = shoppingCart.map((cartItem) => {
             return `
             <tr style="border-bottom: 1px solid var(--border);">
                 <td style="padding: 10px;"><strong>${cartItem.equipment}</strong></td>
@@ -366,7 +434,7 @@ function openCartModal() {
                            style="width: 50px; padding: 5px; border-radius: 4px; border: 1px solid var(--border); text-align: center;">
                 </td>
                 <td style="padding: 10px; text-align:center;">
-                    <button onclick="removeFromCart('${cartItem.id}')" style="background: none; border: none; color: #ef4444; font-size: 1rem; cursor: pointer;" title="Remove">✖</button>
+                    <button onclick="removeFromCart('${cartItem.id}')" style="background: none; border: none; color: #ef4444; font-size: 1rem; cursor: pointer;">✖</button>
                 </td>
             </tr>`;
         }).join('');
@@ -376,9 +444,7 @@ function openCartModal() {
     document.getElementById('cart-modal').classList.remove('hidden');
 }
 
-function closeCartModal() {
-    document.getElementById('cart-modal').classList.add('hidden');
-}
+function closeCartModal() { document.getElementById('cart-modal').classList.add('hidden'); }
 
 function updateCartQty(id, newQty) {
     let item = shoppingCart.find(i => i.id === id);
@@ -394,7 +460,7 @@ function updateCartQty(id, newQty) {
 function removeFromCart(id) {
     shoppingCart = shoppingCart.filter(i => i.id !== id);
     updateCartBadge();
-    openCartModal(); // Refresh view
+    openCartModal(); 
 }
 
 function clearCart() {
@@ -411,23 +477,16 @@ async function checkoutCart() {
     
     const purpose = document.getElementById('cart-purpose').value || "General Laboratory Work";
     const studentName = sessionStorage.getItem('studentName');
-    
-    // Generate 1 master Transaction ID for this batch
     const transactionId = "TXN-" + Math.floor(10000 + Math.random() * 90000); 
 
-    // Process each cart item
     for (let cartItem of shoppingCart) {
         let originalItem = vaultData.find(i => i._id === cartItem.id);
         if (!originalItem) continue;
 
-        // Smart Split Logic
         if (cartItem.reqQty < originalItem.serials.length) {
             let poppedSerials = originalItem.serials.splice(0, cartItem.reqQty);
-            
-            // Save original (now has less stock)
             await fetch(`${API_URL}/items/${originalItem._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(originalItem) });
 
-            // Create new Pending Record
             const batchRequest = {
                 equipment: originalItem.equipment, category: originalItem.category, description: originalItem.description, price: originalItem.price,
                 serials: poppedSerials, status: 'Pending Approval', borrower: studentName, returnDate: returnDate,
@@ -436,7 +495,6 @@ async function checkoutCart() {
             await fetch(`${API_URL}/items`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(batchRequest) });
 
         } else {
-            // They are borrowing ALL stock of this item
             originalItem.status = 'Pending Approval';
             originalItem.borrower = studentName;
             originalItem.returnDate = returnDate;
@@ -452,7 +510,6 @@ async function checkoutCart() {
     closeCartModal();
     alert("Checkout Successful! Your request has been sent to the Administrator.");
     
-    // Hard refresh state
     const itemsRes = await fetch(`${API_URL}/items`);
     vaultData = await itemsRes.json();
     applyFilters();
@@ -469,18 +526,11 @@ function renderRequestsView() {
         return;
     }
 
-    // Group items by their Transaction ID
     let groupedRequests = {};
     pendingData.forEach(item => {
         let tx = item.transactionId || 'LEGACY-REQUEST';
         if (!groupedRequests[tx]) {
-            groupedRequests[tx] = {
-                transactionId: tx,
-                borrower: item.borrower,
-                returnDate: item.returnDate,
-                purpose: item.purpose || 'Not provided',
-                items: []
-            };
+            groupedRequests[tx] = { transactionId: tx, borrower: item.borrower, returnDate: item.returnDate, purpose: item.purpose || 'Not provided', items: [] };
         }
         groupedRequests[tx].items.push(item);
     });
@@ -525,22 +575,18 @@ function renderRequestsView() {
             </div>
         </div>`;
     }
-
     container.innerHTML = html;
 }
 
 async function approveTransaction(txId) {
     let itemsToApprove = vaultData.filter(i => i.status === 'Pending Approval' && i.transactionId === txId);
     let borrowerName = "";
-
     for (let item of itemsToApprove) {
         borrowerName = item.borrower;
         item.status = 'Borrowed';
         await fetch(`${API_URL}/items/${item._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
     }
-
     addLog(`Approved batch request [${txId}] for ${borrowerName}`, "SUCCESS", borrowerName);
-    
     const itemsRes = await fetch(`${API_URL}/items`);
     vaultData = await itemsRes.json();
     applyFilters();
@@ -548,14 +594,11 @@ async function approveTransaction(txId) {
 
 async function rejectTransaction(txId) {
     if(!confirm("Are you sure you want to completely reject and cancel this entire request?")) return;
-
     let itemsToReject = vaultData.filter(i => i.status === 'Pending Approval' && i.transactionId === txId);
     let borrowerName = "";
 
     for (let item of itemsToReject) {
         borrowerName = item.borrower;
-        
-        // Smart Merge Strategy: Regroup with Vault
         const existingAvailableGroup = vaultData.find(i => i.equipment.toLowerCase() === item.equipment.toLowerCase() && i.status === 'Available' && i._id !== item._id);
         
         if (existingAvailableGroup) {
@@ -567,9 +610,7 @@ async function rejectTransaction(txId) {
             await fetch(`${API_URL}/items/${item._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
         }
     }
-
     addLog(`Rejected batch request [${txId}] by ${borrowerName}`, "DELETED", borrowerName);
-    
     const itemsRes = await fetch(`${API_URL}/items`);
     vaultData = await itemsRes.json();
     applyFilters();
@@ -585,7 +626,6 @@ function handleSearch() {
 
 function filterByStatus(s) {
     currentFilter = s;
-    
     document.querySelectorAll('.filter-pills .pill').forEach(btn => {
         btn.classList.remove('active');
         let btnText = btn.innerText.trim();
@@ -593,12 +633,15 @@ function filterByStatus(s) {
             btn.classList.add('active');
         }
     });
-
     applyFilters();
 }
 
 function applyFilters() {
-    if(sessionStorage.getItem('activeRole') === 'admin') updateAnalytics();
+    if(sessionStorage.getItem('activeRole') === 'admin') {
+        updateAnalytics();
+    } else if (sessionStorage.getItem('activeRole') === 'student') {
+        updateStudentAnalytics();
+    }
 
     let filteredData = vaultData.filter(item => {
         let isNotMaintenance = item.status !== 'Maintenance';
@@ -607,11 +650,42 @@ function applyFilters() {
         return matchesStatus && matchesSearch;
     });
 
+    // NEW: Auto-Sort by Deadline for Borrowed Items
+    if (currentFilter === 'Borrowed') {
+        filteredData.sort((a, b) => {
+            if (!a.returnDate) return 1;
+            if (!b.returnDate) return -1;
+            return new Date(a.returnDate) - new Date(b.returnDate);
+        });
+    }
+
     updateTable(filteredData);
     updateMaintenanceTable(); 
     
     if(!document.getElementById('view-charts').classList.contains('hidden')) updateChart(); 
     if(!document.getElementById('view-requests').classList.contains('hidden')) renderRequestsView();
+}
+
+function updateStudentAnalytics() {
+    const myName = sessionStorage.getItem('studentName');
+    let myBorrowed = 0, myOverdue = 0, myTotalPenalties = 0;
+
+    vaultData.forEach(item => {
+        if (item.status === 'Borrowed' && item.borrower === myName) {
+            myBorrowed += item.serials ? item.serials.length : 1;
+            const targetTime = new Date(item.returnDate + "T23:59:59").getTime();
+            
+            if (targetTime < new Date().getTime()) {
+                myOverdue++;
+                const diffDays = Math.ceil((new Date().getTime() - targetTime) / (1000 * 60 * 60 * 24));
+                myTotalPenalties += diffDays * 50;
+            }
+        }
+    });
+
+    document.getElementById('student-stat-borrowed').innerText = myBorrowed;
+    document.getElementById('student-stat-overdue').innerText = myOverdue;
+    document.getElementById('student-stat-penalties').innerText = `₱${myTotalPenalties}`;
 }
 
 function updateAnalytics() {
@@ -622,15 +696,34 @@ function updateAnalytics() {
     document.getElementById('stat-pending').innerText = vaultData.filter(i => i.status === 'Pending Approval').reduce((sum, item) => sum + item.serials.length, 0);
 
     let totalPenalties = 0;
+    let dueToday = 0;
+    let dueTomorrow = 0;
+    let itemsOverdue = 0;
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const tomorrowDate = new Date(); tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+    const tomorrowStr = tomorrowDate.toISOString().split('T')[0];
+
     vaultData.forEach(item => {
         if (item.status === 'Borrowed' && item.returnDate) {
-            const today = new Date(); today.setHours(0,0,0,0);
-            const returnD = new Date(item.returnDate + "T00:00:00");
-            const diffDays = Math.ceil((today - returnD) / (1000*60*60*24));
-            if(diffDays > 0) totalPenalties += (diffDays * 50);
+            const targetTime = new Date(item.returnDate + "T23:59:59").getTime();
+            const now = new Date().getTime();
+            if (targetTime < now) {
+                itemsOverdue++;
+                const diffDays = Math.ceil((now - targetTime) / (1000 * 60 * 60 * 24));
+                totalPenalties += diffDays * 50;
+            }
+
+            if (item.returnDate === todayStr) dueToday++;
+            if (item.returnDate === tomorrowStr) dueTomorrow++;
         }
     });
+
     document.getElementById('stat-penalties').innerText = `₱${totalPenalties}`;
+    
+    document.getElementById('stat-due-today').innerText = dueToday;
+    document.getElementById('stat-due-tomorrow').innerText = dueTomorrow;
+    document.getElementById('stat-overdue').innerText = itemsOverdue;
 
     const maintItems = vaultData.filter(i => i.status === 'Maintenance');
     document.getElementById('stat-maint-total').innerText = maintItems.length;
@@ -694,7 +787,6 @@ function updateChart() {
         
         auditLogs.forEach(log => {
             if (log.action.startsWith("Approved request for ") || log.action.startsWith("Approved batch request ")) {
-                // Approximate counts based on logs
                 let logParts = log.action.split(' for ');
                 let detail = logParts.length > 1 ? logParts[1].split(' by ')[0] : log.action;
                 borrowCounts[detail] = (borrowCounts[detail] || 0) + 1;
@@ -742,7 +834,7 @@ function updateTable(dataToDisplay, role = sessionStorage.getItem('activeRole'),
 
     list.innerHTML = "";
     dataToDisplay.forEach((item, index) => {
-        let row = `<tr><td>${index+1}</td><td><strong>${item.equipment}</strong></td>`;
+        let row = `<tr style="transition: background-color 0.3s;"><td>${index+1}</td><td><strong>${item.equipment}</strong></td>`;
         
         let catHtml = `<td><span style="font-size: 0.8rem; background: #e2e8f0; padding: 4px 8px; border-radius: 6px; color: #475569; white-space: nowrap;">${item.category || 'Others'}</span></td>`;
         let descHtml = `<td>${item.description || '<span style="color:#cbd5e1;font-size:0.8rem;">No Description</span>'}</td>`;
@@ -752,17 +844,14 @@ function updateTable(dataToDisplay, role = sessionStorage.getItem('activeRole'),
         if (item.status === 'Borrowed') badgeClass = 'badge-borrowed';
         if (item.status === 'Pending Approval') badgeClass = 'badge-pending';
         
+        // NEW: Visual Progress Bar & Timer Combo
         let penaltyText = "";
         if (item.status === 'Borrowed' && item.returnDate) {
-            const today = new Date(); today.setHours(0, 0, 0, 0); 
-            const returnD = new Date(item.returnDate + "T00:00:00"); 
-            const diffDays = Math.ceil((today - returnD) / (1000 * 60 * 60 * 24));
-            
-            if (diffDays > 0) {
-                penaltyText = `<br><span style="color: #ef4444; font-size: 0.75rem;"> Overdue! (₱${diffDays * 50})</span>`;
-            } else {
-                penaltyText = `<br><small style="color: #64748b;">Due: ${item.returnDate}</small>`;
-            }
+            penaltyText = `
+            <div style="background: #e2e8f0; border-radius: 4px; width: 100%; height: 6px; margin-top: 8px; overflow: hidden;">
+                <div class="progress-fill" data-date="${item.returnDate}" style="height: 100%; width: 100%; background: #10b981; transition: width 1s linear, background-color 1s;"></div>
+            </div>
+            <span class="countdown-timer" data-date="${item.returnDate}" style="font-size: 0.75rem; display:inline-block; margin-top:2px;">Calculating...</span>`;
         }
         
         let statusHtml = `<span class="badge ${badgeClass}">${item.status}</span>`;
@@ -799,11 +888,10 @@ function updateTable(dataToDisplay, role = sessionStorage.getItem('activeRole'),
             }
             
             row += `${catHtml}${descHtml}${qtyHtml}${serialsHtml}
-                    <td>${statusHtml}</td><td>${actionHtml}</td>`;
+                    <td style="width: 180px;">${statusHtml}</td><td>${actionHtml}</td>`;
         } else {
             let btn = '';
             if (item.status === 'Available') {
-                // STUDENT CART BUTTON
                 btn = `<button onclick="addToCart('${item._id}')" class="btn-action-sm" style="background:var(--cit-blue); color:white; border:none; padding:6px 8px; border-radius:4px; cursor:pointer; width:100%; margin-bottom:5px; font-weight:bold;">🛒 Add to Bag</button>
                        <button onclick="openReportModal('${item._id}')" class="btn-action-sm" style="background:#ef4444; color:white; border:none; padding:4px 8px; border-radius:4px; cursor:pointer; width:100%;">Report Issue</button>`;
             } else if (item.status === 'Pending Approval' && item.borrower === studentData.name) {
@@ -814,7 +902,7 @@ function updateTable(dataToDisplay, role = sessionStorage.getItem('activeRole'),
                 btn = `<span style="font-size: 0.8rem; color: #64748b;">Unavailable</span>`;
             }
             
-            row += `${catHtml}${descHtml}${qtyHtml}<td>${statusHtml}</td><td>${btn}</td>`;
+            row += `${catHtml}${descHtml}${qtyHtml}<td style="width: 180px;">${statusHtml}</td><td>${btn}</td>`;
         }
         list.innerHTML += row + "</tr>";
     });
@@ -929,7 +1017,7 @@ async function addNewItem() {
     applyFilters(); 
 }
 
-// --- MAINTENANCE ACTIONS (SMART SPLIT) ---
+// --- MAINTENANCE ACTIONS ---
 function openReportModal(id) {
     pendingReportId = id;
     const item = vaultData.find(i => i._id === id);
@@ -1089,12 +1177,6 @@ async function removeItem(id) {
 
 async function returnItem(id) {
     let returnedItem = vaultData.find(i => i._id === id);
-    if (returnedItem.returnDate) {
-        const today = new Date(); today.setHours(0, 0, 0, 0);
-        const returnD = new Date(returnedItem.returnDate + "T00:00:00");
-        const diffDays = Math.ceil((today - returnD) / (1000 * 60 * 60 * 24));
-        if (diffDays > 0) alert(` OVERDUE ITEM DETECTED!\n\nPlease proceed to the Administrator to pay the penalty fee of ₱${diffDays * 50}.`);
-    }
     
     addLog(`Returned ${returnedItem.equipment}`, "SUCCESS", returnedItem.borrower);
     

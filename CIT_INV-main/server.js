@@ -8,7 +8,6 @@ const app = express();
 // --- MIDDLEWARE ---
 app.use(cors());
 app.use(express.json());
-// Serves static files if Vercel routing misses them
 app.use(express.static(path.join(__dirname))); 
 
 // --- DATABASE CONNECTION ---
@@ -39,7 +38,7 @@ const Item = mongoose.model('Item', new mongoose.Schema({
     repairCost: Number,
     maintenanceNotes: String,
 
-    // NEW: Smart Cart Transaction Fields
+    // Smart Cart Transaction Fields
     transactionId: String,
     purpose: String
 }));
@@ -84,7 +83,6 @@ app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// --- PORT ---
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server on port ${PORT}`));
 

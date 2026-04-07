@@ -7,6 +7,28 @@
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* Pulse animation for severely overdue items */
+        @keyframes pulseRed {
+            0% { transform: scale(1); opacity: 1; text-shadow: 0 0 0 rgba(239, 68, 68, 0); }
+            50% { transform: scale(1.02); opacity: 0.8; text-shadow: 0 0 8px rgba(239, 68, 68, 0.6); }
+            100% { transform: scale(1); opacity: 1; text-shadow: 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .pulse-red {
+            animation: pulseRed 1.2s infinite;
+            display: inline-block;
+        }
+        
+        /* Flashing Background for Overdue Rows */
+        @keyframes flashRow {
+            0% { background-color: transparent; }
+            50% { background-color: rgba(239, 68, 68, 0.08); }
+            100% { background-color: transparent; }
+        }
+        .row-overdue {
+            animation: flashRow 2s infinite;
+        }
+    </style>
 </head>
 <body>
 
@@ -75,15 +97,16 @@
             <div class="scroll-content">
                 
                 <div id="view-home">
+                    
                     <div id="admin-analytics" class="admin-only hidden">
-                        <h2 class="page-header">Recent activity</h2>
-                        <div class="metrics-grid">
+                        <h2 class="page-header" style="margin-bottom: 10px;">Vault Overview</h2>
+                        <div class="metrics-grid" style="margin-bottom: 15px;">
                             <div class="metric-card">
                                 <div class="metric-value" id="stat-total">0</div>
                                 <div class="metric-label">TOTAL EQUIPMENT</div>
                             </div>
                             <div class="metric-card">
-                                <div class="metric-value" id="stat-borrowed" style="color:#f59e0b;">0</div>
+                                <div class="metric-value" id="stat-borrowed" style="color:#3b82f6;">0</div>
                                 <div class="metric-label">BORROWED</div>
                             </div>
                             <div class="metric-card">
@@ -92,12 +115,46 @@
                             </div>
                             <div class="metric-card">
                                 <div class="metric-value" id="stat-penalties" style="color:#ef4444;">₱0</div>
-                                <div class="metric-label">OVERDUE FEES</div>
+                                <div class="metric-label">TOTAL OVERDUE FEES</div>
+                            </div>
+                        </div>
+                        
+                        <h2 class="page-header" style="margin-bottom: 10px; font-size: 1rem; color: #64748b;">⏳ Deadline Watch</h2>
+                        <div class="metrics-grid">
+                            <div class="metric-card" style="border-left: 4px solid #10b981;">
+                                <div class="metric-value" id="stat-due-today" style="color:#10b981;">0</div>
+                                <div class="metric-label">DUE TODAY</div>
+                            </div>
+                            <div class="metric-card" style="border-left: 4px solid #f59e0b;">
+                                <div class="metric-value" id="stat-due-tomorrow" style="color:#f59e0b;">0</div>
+                                <div class="metric-label">DUE TOMORROW</div>
+                            </div>
+                            <div class="metric-card" style="border-left: 4px solid #ef4444; background: #fef2f2;">
+                                <div class="metric-value" id="stat-overdue" style="color:#ef4444;">0</div>
+                                <div class="metric-label" style="color:#dc2626;">ITEMS OVERDUE</div>
                             </div>
                         </div>
                     </div>
 
-                    <div id="admin-controls" class="card admin-only hidden">
+                    <div id="student-analytics" class="student-only hidden" style="margin-bottom: 25px;">
+                        <h2 class="page-header" style="margin-bottom: 10px;">My Borrowing Stats</h2>
+                        <div class="metrics-grid">
+                            <div class="metric-card" style="border-left: 4px solid #3b82f6;">
+                                <div class="metric-value" id="student-stat-borrowed" style="color:#3b82f6;">0</div>
+                                <div class="metric-label">CURRENTLY BORROWING</div>
+                            </div>
+                            <div class="metric-card" style="border-left: 4px solid #ef4444;">
+                                <div class="metric-value pulse-red" id="student-stat-overdue" style="color:#ef4444;">0</div>
+                                <div class="metric-label">OVERDUE ITEMS</div>
+                            </div>
+                            <div class="metric-card" style="border-left: 4px solid #f59e0b;">
+                                <div class="metric-value" id="student-stat-penalties" style="color:#f59e0b;">₱0</div>
+                                <div class="metric-label">MY LATE PENALTIES</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="admin-controls" class="card admin-only hidden" style="margin-top: 25px;">
                         <h2 class="card-header" style="margin-bottom: 25px; color: var(--cit-blue);">Add product</h2>
                         <div class="form-row">
                             <div class="form-group">
@@ -152,7 +209,7 @@
                         <p id="admin-hint" style="font-size: 0.75rem; color: #64748b; margin-bottom: 15px;" class="admin-only hidden">Admin click the 3DES value to instantly decrypt the serial.</p>
                         
                         <div class="table-responsive">
-                            <table id="vault-table">
+                            <table id="vault-table" style="width: 100%; border-collapse: collapse;">
                                 <thead></thead>
                                 <tbody id="inventory-list"></tbody>
                             </table>
@@ -190,8 +247,7 @@
                     <div class="card table-card">
                         <h2 class="card-header section-title" style="margin: 0; color: var(--cit-blue); margin-bottom: 20px;">Pending Borrow Transactions</h2>
                         <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 20px;">Review and manage student cart checkouts.</p>
-                        <div id="requests-container" style="display: flex; flex-direction: column; gap: 20px;">
-                            </div>
+                        <div id="requests-container" style="display: flex; flex-direction: column; gap: 20px;"></div>
                     </div>
                 </div>
 
@@ -262,7 +318,6 @@
                 <span>🛒 Equipment Bag</span>
                 <span id="cart-total-badge" style="font-size: 0.9rem; background: var(--cit-blue); color: white; padding: 4px 12px; border-radius: 20px;">0 Items</span>
             </h2>
-            
             <div class="table-responsive" style="max-height: 250px; overflow-y: auto; margin-bottom: 20px; border: 1px solid var(--border); border-radius: 8px;">
                 <table style="width: 100%; text-align: left; border-collapse: collapse;">
                     <thead style="background: #f8fafc; position: sticky; top: 0;">
@@ -272,11 +327,9 @@
                             <th style="padding: 10px; text-align:center;">Action</th>
                         </tr>
                     </thead>
-                    <tbody id="cart-list">
-                        </tbody>
+                    <tbody id="cart-list"></tbody>
                 </table>
             </div>
-
             <div class="form-row" style="margin-bottom: 5px;">
                 <div class="form-group" style="flex: 1;">
                     <label style="font-size: 0.85rem; font-weight: bold;">Expected Return Date*</label>
@@ -287,7 +340,6 @@
                     <input type="text" id="cart-purpose" placeholder="e.g. Thesis Experiment" style="padding: 10px; width: 100%; border-radius: 8px; border: 1px solid var(--border);">
                 </div>
             </div>
-
             <div style="display:flex; gap:10px; justify-content:center; margin-top:20px;">
                 <button class="btn-primary" style="flex: 2; background: #10b981;" onclick="checkoutCart()">Checkout Items</button>
                 <button class="btn-danger" style="flex: 1; background: #f59e0b;" onclick="clearCart()">Clear Bag</button>
@@ -295,7 +347,6 @@
             </div>
         </div>
     </div>
-
 
     <div id="password-modal" class="overlay hidden">
         <div class="modal-card">
