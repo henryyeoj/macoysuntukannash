@@ -11,8 +11,11 @@ let lockoutEndTime = null;
 let vaultData = [];
 let auditLogs = [];
 let pendingBorrowId = null;
+let pendingReportId = null;
+let pendingMaintenanceId = null;
+
 let categoryChartInstance = null; 
-let popularChartInstance = null; // NEW: Tracks the Popularity Chart
+let popularChartInstance = null; 
 
 // --- SEARCH & FILTER STATE ---
 let currentFilter = "All";
@@ -156,7 +159,6 @@ function setupUI(role, studentData = null) {
         ? "Admin Access Verified"
         : `Student: <span style="color: #10b981;">${studentData.name}</span>`;
     
-    // Always default to home view on fresh load
     switchNav('home');
     
     if (isAdmin) {
@@ -175,11 +177,15 @@ function showSecurityAlert(msg) {
 // --- PAGE ROUTER ---
 function switchNav(view) {
     document.getElementById('nav-home').classList.remove('active');
+    document.getElementById('nav-maintenance').classList.remove('active');
     document.getElementById('nav-charts').classList.remove('active');
+    
     document.getElementById(`nav-${view}`).classList.add('active');
 
     document.getElementById('view-home').classList.add('hidden');
+    document.getElementById('view-maintenance').classList.add('hidden');
     document.getElementById('view-charts').classList.add('hidden');
+    
     document.getElementById(`view-${view}`).classList.remove('hidden');
 
     if (view === 'charts') updateChart();
@@ -290,8 +296,8 @@ function updateStudentHistory() {
     }
     
     list.innerHTML = myLogs.map(log => {
-        let badgeClass = 'badge-available'; // green
-        if (log.status === 'PENDING' || log.action.includes('Requested')) badgeClass = 'badge-pending';
+        let badgeClass = 'badge-available'; 
+        if (log.status === 'PENDING' || log.action.includes('Requested') || log.action.includes('Reported')) badgeClass = 'badge-pending';
         if (log.status === 'DELETED' || log.action.includes('Rejected')) badgeClass = 'badge-maintenance'; 
         
         return `<tr style="border-bottom: 1px solid var(--border);">
@@ -302,7 +308,7 @@ function updateStudentHistory() {
     }).join('');
 }
 
-// --- SEARCH, FILTERS & CHARTS ---
+// --- SEARCH, FILTERS & ROUTING ---
 function handleSearch() {
     searchQuery = document.getElementById('search-input').value.toLowerCase();
     applyFilters();
@@ -326,14 +332,16 @@ function applyFilters() {
     if(sessionStorage.getItem('activeRole') === 'admin') updateAnalytics();
 
     let filteredData = vaultData.filter(item => {
-        let matchesStatus = currentFilter === 'All' ? true : item.status === currentFilter;
+        // Exclude Maintenance items from the main vault filter (unless 'All' is selected, wait no, let's keep Maintenance out of Vault 'All' completely to keep it clean)
+        let isNotMaintenance = item.status !== 'Maintenance';
+        let matchesStatus = currentFilter === 'All' ? isNotMaintenance : item.status === currentFilter;
         let matchesSearch = item.equipment.toLowerCase().includes(searchQuery);
         return matchesStatus && matchesSearch;
     });
 
     updateTable(filteredData);
+    updateMaintenanceTable(); 
     
-    // Only redraw chart if the chart page is visible
     if(!document.getElementById('view-charts').classList.contains('hidden')) {
         updateChart(); 
     }
@@ -356,13 +364,19 @@ function updateAnalytics() {
         }
     });
     document.getElementById('stat-penalties').innerText = `₱${totalPenalties}`;
+
+    // Update Maintenance Metrics
+    const maintItems = vaultData.filter(i => i.status === 'Maintenance');
+    document.getElementById('stat-maint-total').innerText = maintItems.length;
+    
+    let totalRepairCost = maintItems.reduce((sum, item) => sum + (item.repairCost || 0), 0);
+    document.getElementById('stat-maint-cost').innerText = `₱${totalRepairCost}`;
 }
 
 // --- CHART GENERATION TOOL ---
 function updateChart() {
     if (typeof Chart === 'undefined') return;
 
-    // ----- 1. CATEGORY DOUGHNUT CHART -----
     const ctxCat = document.getElementById('categoryChart');
     if (ctxCat) {
         let categoryCounts = {};
@@ -409,23 +423,19 @@ function updateChart() {
         });
     }
 
-    // ----- 2. POPULARITY BAR CHART -----
     const ctxPop = document.getElementById('popularChart');
     if (ctxPop) {
         let borrowCounts = {};
         
-        // Scan historical logs for borrow approvals to find what is truly popular
         auditLogs.forEach(log => {
             if (log.action.startsWith("Approved request for ")) {
-                // Log string format: "Approved request for Laptop by StudentName"
                 let parts = log.action.split(' by ');
-                parts.pop(); // Remove "StudentName"
+                parts.pop(); 
                 let eqName = parts.join(' by ').replace("Approved request for ", "").trim();
                 borrowCounts[eqName] = (borrowCounts[eqName] || 0) + 1;
             }
         });
 
-        // Convert to array and get top 5
         let sortedPopular = Object.keys(borrowCounts).map(name => {
             return { name: name, count: borrowCounts[name] };
         }).sort((a, b) => b.count - a.count).slice(0, 5);
@@ -446,14 +456,13 @@ function updateChart() {
             options: {
                 responsive: true, maintainAspectRatio: false,
                 scales: {
-                    y: { beginAtZero: true, ticks: { precision: 0 } } // Whole numbers only
+                    y: { beginAtZero: true, ticks: { precision: 0 } } 
                 },
                 plugins: {
                     legend: { display: false },
                     tooltip: {
                         callbacks: {
                             title: function(context) {
-                                // Show full name on hover if truncated
                                 let idx = context[0].dataIndex;
                                 return sortedPopular[idx].name;
                             }
@@ -465,14 +474,14 @@ function updateChart() {
     }
 }
 
-// --- TABLE RENDERING ---
+// --- TABLE RENDERING: VAULT ---
 function updateTable(dataToDisplay, role = sessionStorage.getItem('activeRole'), studentData = {name: sessionStorage.getItem('studentName')}) {
     const thead = document.querySelector('#vault-table thead');
     const list = document.getElementById('inventory-list');
     const isAdmin = (role === 'admin');
 
     thead.innerHTML = isAdmin ?
-        `<tr><th>#</th><th>Equipment</th><th>Category</th><th>Description</th><th>Price</th><th>Qty</th><th>Encrypted Serials</th><th>Status</th><th>Action</th></tr>` :
+        `<tr><th>#</th><th>Equipment</th><th>Category</th><th>Description</th><th>Qty</th><th>Encrypted Serials</th><th>Status</th><th>Action</th></tr>` :
         `<tr><th>#</th><th>Equipment</th><th>Category</th><th>Description</th><th>Qty</th><th>Status</th><th>Action</th></tr>`;
 
     list.innerHTML = "";
@@ -481,13 +490,11 @@ function updateTable(dataToDisplay, role = sessionStorage.getItem('activeRole'),
         
         let catHtml = `<td><span style="font-size: 0.8rem; background: #e2e8f0; padding: 4px 8px; border-radius: 6px; color: #475569; white-space: nowrap;">${item.category || 'Others'}</span></td>`;
         let descHtml = `<td>${item.description || '<span style="color:#cbd5e1;font-size:0.8rem;">No Description</span>'}</td>`;
-        let priceHtml = `<td>₱${item.price || 0}</td>`;
         let qtyHtml = `<td><span style="font-weight:bold; color:var(--cit-blue); background:#e2e8f0; padding:4px 10px; border-radius:20px;">${item.serials ? item.serials.length : 0}</span></td>`;
 
         let badgeClass = 'badge-available';
         if (item.status === 'Borrowed') badgeClass = 'badge-borrowed';
         if (item.status === 'Pending Approval') badgeClass = 'badge-pending';
-        if (item.status === 'Maintenance') badgeClass = 'badge-maintenance';
         
         let penaltyText = "";
         if (item.status === 'Borrowed' && item.returnDate) {
@@ -530,21 +537,19 @@ function updateTable(dataToDisplay, role = sessionStorage.getItem('activeRole'),
                 actionHtml = `<button onclick="acceptRequest('${item._id}')" class="btn-action-sm" style="background:#10b981;">Accept</button>
                               <button onclick="rejectRequest('${item._id}')" class="btn-action-sm" style="background:#ef4444;">Reject</button>`;
             } else if (item.status === 'Available') {
-                actionHtml = `<button onclick="toggleMaintenance('${item._id}')" class="btn-action-sm" style="background:#f59e0b; color:white;">Set Maintenance</button>
-                              <button onclick="removeItem('${item._id}')" class="btn-delete-row" style="margin-top:5px;">Delete Group</button>`;
-            } else if (item.status === 'Maintenance') {
-                actionHtml = `<button onclick="toggleMaintenance('${item._id}')" class="btn-action-sm" style="background:#10b981;">Make Available</button>
-                              <button onclick="removeItem('${item._id}')" class="btn-delete-row" style="margin-top:5px;">Delete Group</button>`;
+                actionHtml = `<button onclick="removeItem('${item._id}')" class="btn-delete-row" style="margin-bottom:5px;">Delete</button>
+                              <button onclick="openReportModal('${item._id}')" class="btn-action-sm" style="background:#ef4444; color:white;">Report Issue</button>`;
             } else {
                 actionHtml = `<button onclick="removeItem('${item._id}')" class="btn-delete-row">Delete Group</button>`;
             }
             
-            row += `${catHtml}${descHtml}${priceHtml}${qtyHtml}${serialsHtml}
+            row += `${catHtml}${descHtml}${qtyHtml}${serialsHtml}
                     <td>${statusHtml}</td><td>${actionHtml}</td>`;
         } else {
             let btn = '';
             if (item.status === 'Available') {
-                btn = `<button onclick="borrowItem('${item._id}')" class="btn-borrow">Borrow</button>`;
+                btn = `<button onclick="borrowItem('${item._id}')" class="btn-borrow" style="margin-bottom:5px;">Borrow</button>
+                       <button onclick="openReportModal('${item._id}')" class="btn-action-sm" style="background:#ef4444; color:white; border:none; padding:4px 8px; border-radius:4px; cursor:pointer; width:100%;">Report Issue</button>`;
             } else if (item.status === 'Pending Approval' && item.borrower === studentData.name) {
                 btn = `<span style="font-size: 0.8rem; color: #6366f1; font-weight: bold;">Waiting...</span>`;
             } else if (item.status === 'Borrowed' && item.borrower === studentData.name) {
@@ -558,6 +563,75 @@ function updateTable(dataToDisplay, role = sessionStorage.getItem('activeRole'),
         list.innerHTML += row + "</tr>";
     });
 }
+
+// --- TABLE RENDERING: MAINTENANCE ---
+function updateMaintenanceTable() {
+    const list = document.getElementById('maintenance-list');
+    const thead = document.querySelector('#maintenance-table thead');
+    const isAdmin = (sessionStorage.getItem('activeRole') === 'admin');
+
+    const maintData = vaultData.filter(i => i.status === 'Maintenance');
+
+    thead.innerHTML = isAdmin ?
+        `<tr style="border-bottom: 2px solid var(--border); color: var(--text-muted); font-size: 0.85rem;">
+            <th style="padding: 12px 10px;">Equipment</th>
+            <th style="padding: 12px 10px;">Issue</th>
+            <th style="padding: 12px 10px;">Reported By</th>
+            <th style="padding: 12px 10px;">Status</th>
+            <th style="padding: 12px 10px;">Cost / Sent To</th>
+            <th style="padding: 12px 10px;">Est. Return</th>
+            <th style="padding: 12px 10px;">Actions</th>
+        </tr>` :
+        `<tr style="border-bottom: 2px solid var(--border); color: var(--text-muted); font-size: 0.85rem;">
+            <th style="padding: 12px 10px;">Equipment</th>
+            <th style="padding: 12px 10px;">Issue</th>
+            <th style="padding: 12px 10px;">Reported By</th>
+            <th style="padding: 12px 10px;">Status</th>
+            <th style="padding: 12px 10px;">Est. Return</th>
+        </tr>`;
+
+    list.innerHTML = "";
+    
+    if (maintData.length === 0) {
+        list.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:20px; color:#64748b;">No items currently under maintenance.</td></tr>`;
+        return;
+    }
+
+    maintData.forEach(item => {
+        // Color code logic for Maintenance Status
+        let badgeColor = '#64748b'; 
+        let rs = item.repairStatus || 'Pending';
+        if (rs === 'Pending' || rs === 'Diagnosed') badgeColor = '#ef4444'; // Red
+        else if (rs === 'Sent for Repair' || rs === 'Repairing') badgeColor = '#f59e0b'; // Yellow
+        else if (rs === 'Fixed') badgeColor = '#10b981'; // Green
+
+        let statusBadge = `<span style="background:${badgeColor}; color:white; padding:4px 8px; border-radius:12px; font-size:0.75rem; font-weight:bold;">${rs}</span>`;
+        let returnText = item.estimatedReturnDate ? `<small style="color:#64748b;">${item.estimatedReturnDate}</small>` : `<small style="color:#cbd5e1;">Not Set</small>`;
+
+        let row = `<tr style="border-bottom: 1px solid var(--border);">
+            <td style="padding: 12px 10px;"><strong>${item.equipment}</strong><br><small style="color:#64748b;">${item.category || ''}</small></td>
+            <td style="padding: 12px 10px; max-width: 200px;"><small>${item.issueDescription || 'No description'}</small></td>
+            <td style="padding: 12px 10px;"><small><strong>${item.reportedBy || 'System'}</strong><br>${item.dateReported || ''}</small></td>
+            <td style="padding: 12px 10px;">${statusBadge}</td>`;
+
+        if (isAdmin) {
+            let details = `<small style="color:#64748b;">₱${item.repairCost || 0}<br>${item.sentTo || 'Internal'}</small>`;
+            
+            let actionHtml = `
+                <button onclick="openEditMaintModal('${item._id}')" class="btn-action-sm" style="background:#3b82f6; width:100%; margin-bottom:5px;">Edit Record</button>
+                <button onclick="markAsFixed('${item._id}')" class="btn-action-sm" style="background:#10b981; width:100%;">Mark Fixed (Return)</button>
+            `;
+            
+            row += `<td style="padding: 12px 10px;">${details}</td><td style="padding: 12px 10px;">${returnText}</td><td style="padding: 12px 10px;">${actionHtml}</td>`;
+        } else {
+            row += `<td style="padding: 12px 10px;">${returnText}</td>`;
+        }
+        
+        row += `</tr>`;
+        list.innerHTML += row;
+    });
+}
+
 
 // --- DATABASE ACTIONS ---
 async function addNewItem() {
@@ -573,37 +647,18 @@ async function addNewItem() {
     }
 
     const encryptedSerial = await apply3DESWithVisuals(s);
-
     const existingItem = vaultData.find(i => i.equipment.toLowerCase() === n.toLowerCase() && i.status === 'Available');
 
     if (existingItem) {
         existingItem.serials.push(encryptedSerial);
-
         try {
-            await fetch(`${API_URL}/items/${existingItem._id}`, { 
-                method: 'PUT', 
-                headers: { 'Content-Type': 'application/json' }, 
-                body: JSON.stringify(existingItem) 
-            });
+            await fetch(`${API_URL}/items/${existingItem._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(existingItem) });
             addLog(`Combined Serial into existing group: ${n}`, "SUCCESS", "admin");
         } catch(err) { console.error(err); return; }
-
     } else {
-        const newItem = { 
-            equipment: n, 
-            category: cat,         
-            description: desc,     
-            price: Number(price),  
-            serials: [encryptedSerial], 
-            status: 'Available' 
-        };
-
+        const newItem = { equipment: n, category: cat, description: desc, price: Number(price), serials: [encryptedSerial], status: 'Available' };
         try {
-            await fetch(`${API_URL}/items`, { 
-                method: 'POST', 
-                headers: { 'Content-Type': 'application/json' }, 
-                body: JSON.stringify(newItem) 
-            });
+            await fetch(`${API_URL}/items`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newItem) });
             addLog(`Registered New Item Group: ${n}`, "SUCCESS", "admin");
         } catch(err) { console.error(err); return; }
     }
@@ -616,10 +671,150 @@ async function addNewItem() {
     document.getElementById('item-description').value = ""; 
     document.getElementById('item-price').value = "";       
     document.getElementById('item-category').value = ""; 
-    
     applyFilters(); 
 }
 
+// --- MAINTENANCE ACTIONS (SMART SPLIT) ---
+function openReportModal(id) {
+    pendingReportId = id;
+    const item = vaultData.find(i => i._id === id);
+    const selContainer = document.getElementById('report-serial-container');
+    const selectEl = document.getElementById('report-serial-select');
+    
+    document.getElementById('report-issue-desc').value = "";
+
+    if (item.serials && item.serials.length > 1) {
+        selContainer.classList.remove('hidden');
+        selectEl.innerHTML = item.serials.map((s, idx) => {
+            let shortS = s.length > 15 ? s.substring(0, 15) + '...' : s;
+            return `<option value="${idx}">SN #${idx + 1}: ${shortS}</option>`;
+        }).join('');
+    } else {
+        selContainer.classList.add('hidden');
+        selectEl.innerHTML = `<option value="0">Default</option>`;
+    }
+    
+    document.getElementById('report-modal').classList.remove('hidden');
+}
+
+function closeReportModal() {
+    document.getElementById('report-modal').classList.add('hidden');
+}
+
+async function submitBrokenReport() {
+    const desc = document.getElementById('report-issue-desc').value.trim();
+    if (!desc) return alert("Please provide a description of the issue.");
+    
+    let item = vaultData.find(i => i._id === pendingReportId);
+    let selectedIdx = parseInt(document.getElementById('report-serial-select').value) || 0;
+    
+    let reporter = sessionStorage.getItem('activeRole') === 'admin' ? 'Admin' : sessionStorage.getItem('studentName');
+    let today = new Date().toLocaleDateString();
+
+    if (item.serials.length > 1) {
+        // SMART SPLIT: Pull the broken serial out
+        const brokenSerial = item.serials.splice(selectedIdx, 1)[0]; 
+        
+        await fetch(`${API_URL}/items/${item._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
+
+        const brokenItemObj = {
+            equipment: item.equipment, category: item.category, description: item.description, price: item.price, serials: [brokenSerial],
+            status: 'Maintenance', repairStatus: 'Pending', issueDescription: desc, reportedBy: reporter, dateReported: today
+        };
+
+        await fetch(`${API_URL}/items`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(brokenItemObj) });
+    } else {
+        // Only 1 item, so convert the whole row
+        item.status = 'Maintenance';
+        item.repairStatus = 'Pending';
+        item.issueDescription = desc;
+        item.reportedBy = reporter;
+        item.dateReported = today;
+
+        await fetch(`${API_URL}/items/${item._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
+    }
+
+    addLog(`Reported broken: ${item.equipment}`, "PENDING", reporter);
+    closeReportModal();
+    
+    const itemsRes = await fetch(`${API_URL}/items`);
+    vaultData = await itemsRes.json();
+    applyFilters();
+}
+
+function openEditMaintModal(id) {
+    pendingMaintenanceId = id;
+    const item = vaultData.find(i => i._id === id);
+    
+    document.getElementById('edit-maint-eq-name').innerText = `Editing: ${item.equipment}`;
+    document.getElementById('maint-status').value = item.repairStatus || 'Pending';
+    document.getElementById('maint-sent-to').value = item.sentTo || '';
+    document.getElementById('maint-cost').value = item.repairCost || '';
+    document.getElementById('maint-return-date').value = item.estimatedReturnDate || '';
+    document.getElementById('maint-notes').value = item.maintenanceNotes || '';
+    
+    document.getElementById('edit-maintenance-modal').classList.remove('hidden');
+}
+
+function closeEditMaintModal() {
+    document.getElementById('edit-maintenance-modal').classList.add('hidden');
+}
+
+async function saveMaintenanceUpdate() {
+    let item = vaultData.find(i => i._id === pendingMaintenanceId);
+    
+    item.repairStatus = document.getElementById('maint-status').value;
+    item.sentTo = document.getElementById('maint-sent-to').value;
+    item.repairCost = Number(document.getElementById('maint-cost').value);
+    item.estimatedReturnDate = document.getElementById('maint-return-date').value;
+    item.maintenanceNotes = document.getElementById('maint-notes').value;
+
+    try {
+        await fetch(`${API_URL}/items/${item._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
+        addLog(`Updated repair record: ${item.equipment} (${item.repairStatus})`, "SUCCESS", "admin");
+        closeEditMaintModal();
+        
+        const itemsRes = await fetch(`${API_URL}/items`);
+        vaultData = await itemsRes.json();
+        applyFilters();
+    } catch(err) { console.error(err); }
+}
+
+async function markAsFixed(id) {
+    if(!confirm("Is this item fixed? It will be returned to the Available Vault.")) return;
+
+    let repairedItem = vaultData.find(i => i._id === id);
+    
+    // SMART MERGE: Regroup with available items if possible
+    const existingAvailableGroup = vaultData.find(i => i.equipment.toLowerCase() === repairedItem.equipment.toLowerCase() && i.status === 'Available' && i._id !== id);
+
+    if (existingAvailableGroup) {
+        existingAvailableGroup.serials.push(repairedItem.serials[0]);
+        await fetch(`${API_URL}/items/${existingAvailableGroup._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(existingAvailableGroup) });
+        await fetch(`${API_URL}/items/${id}`, { method: 'DELETE' });
+    } else {
+        // Clear maintenance fields and restore status
+        repairedItem.status = 'Available'; 
+        repairedItem.repairStatus = '';
+        repairedItem.issueDescription = '';
+        repairedItem.reportedBy = '';
+        repairedItem.dateReported = '';
+        repairedItem.sentTo = '';
+        repairedItem.repairCost = 0;
+        repairedItem.estimatedReturnDate = '';
+        repairedItem.maintenanceNotes = '';
+
+        await fetch(`${API_URL}/items/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(repairedItem) });
+    }
+
+    addLog(`Fixed & Returned to Vault: ${repairedItem.equipment}`, "SUCCESS", "admin");
+    const itemsRes = await fetch(`${API_URL}/items`);
+    vaultData = await itemsRes.json();
+    applyFilters();
+}
+
+
+// --- EXISTING UTILS ---
 function unlockItem(id, index = 0) {
     const item = vaultData.find(i => i._id === id);
     const decryptedSerial = decrypt3DES(item.serials[index]);
@@ -649,11 +844,9 @@ async function acceptRequest(id) {
 async function rejectRequest(id) {
     let item = vaultData.find(i => i._id === id);
     let studentName = item.borrower;
-    
     addLog(`Rejected request for ${item.equipment} by ${studentName}`, "DELETED", studentName);
 
     const existingAvailableGroup = vaultData.find(i => i.equipment.toLowerCase() === item.equipment.toLowerCase() && i.status === 'Available' && i._id !== id);
-
     if (existingAvailableGroup) {
         existingAvailableGroup.serials.push(item.serials[0]);
         await fetch(`${API_URL}/items/${existingAvailableGroup._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(existingAvailableGroup) });
@@ -676,17 +869,6 @@ async function removeItem(id) {
     }
 }
 
-async function toggleMaintenance(id) {
-    let item = vaultData.find(i => i._id === id);
-    item.status = item.status === 'Maintenance' ? 'Available' : 'Maintenance';
-    
-    try {
-        await fetch(`${API_URL}/items/${item._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
-        addLog(`Status changed to ${item.status}: ${item.equipment}`, "SUCCESS", "admin");
-        applyFilters();
-    } catch(err) { console.error(err); }
-}
-
 function borrowItem(id) {
     pendingBorrowId = id;
     document.getElementById('borrow-modal').classList.remove('hidden');
@@ -700,45 +882,19 @@ async function confirmBorrow() {
     
     if (item.serials.length > 1) {
         const borrowedSerial = item.serials.pop(); 
-        
-        await fetch(`${API_URL}/items/${item._id}`, { 
-            method: 'PUT', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify(item) 
-        });
-
+        await fetch(`${API_URL}/items/${item._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
         const newBorrowedItem = {
-            equipment: item.equipment,
-            category: item.category,
-            description: item.description,
-            price: item.price,
-            serials: [borrowedSerial],
-            status: 'Pending Approval',
-            borrower: sessionStorage.getItem('studentName'),
-            returnDate: date
+            equipment: item.equipment, category: item.category, description: item.description, price: item.price,
+            serials: [borrowedSerial], status: 'Pending Approval', borrower: sessionStorage.getItem('studentName'), returnDate: date
         };
-
-        await fetch(`${API_URL}/items`, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify(newBorrowedItem) 
-        });
-
+        await fetch(`${API_URL}/items`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newBorrowedItem) });
     } else {
-        item.status = 'Pending Approval';
-        item.borrower = sessionStorage.getItem('studentName');
-        item.returnDate = date;
-
-        await fetch(`${API_URL}/items/${item._id}`, { 
-            method: 'PUT', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify(item) 
-        });
+        item.status = 'Pending Approval'; item.borrower = sessionStorage.getItem('studentName'); item.returnDate = date;
+        await fetch(`${API_URL}/items/${item._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
     }
 
     addLog(`Requested 1x ${item.equipment}`, "PENDING", sessionStorage.getItem('studentName'));
     closeBorrowModal();
-    
     const itemsRes = await fetch(`${API_URL}/items`);
     vaultData = await itemsRes.json();
     applyFilters();
@@ -759,23 +915,11 @@ async function returnItem(id) {
 
     if (existingAvailableGroup) {
         existingAvailableGroup.serials.push(returnedItem.serials[0]);
-        
-        await fetch(`${API_URL}/items/${existingAvailableGroup._id}`, { 
-            method: 'PUT', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify(existingAvailableGroup) 
-        });
-        
+        await fetch(`${API_URL}/items/${existingAvailableGroup._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(existingAvailableGroup) });
         await fetch(`${API_URL}/items/${id}`, { method: 'DELETE' });
     } else {
-        returnedItem.status = 'Available'; 
-        returnedItem.borrower = ''; 
-        returnedItem.returnDate = '';
-        await fetch(`${API_URL}/items/${id}`, { 
-            method: 'PUT', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify(returnedItem) 
-        });
+        returnedItem.status = 'Available'; returnedItem.borrower = ''; returnedItem.returnDate = '';
+        await fetch(`${API_URL}/items/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(returnedItem) });
     }
 
     const itemsRes = await fetch(`${API_URL}/items`);
@@ -783,33 +927,21 @@ async function returnItem(id) {
     applyFilters();
 }
 
-// --- CONFIG SETTINGS ---
 async function saveNewPassword() {
     const oldPass = document.getElementById('old-password-field').value;
     const newPass = document.getElementById('new-password-field').value;
-    
-    if (!oldPass || !newPass) { 
-        alert("Please fill in both fields."); return; 
-    }
+    if (!oldPass || !newPass) { alert("Please fill in both fields."); return; }
 
     if (oldPass === currentPassword) {
         currentPassword = newPass;
-        await fetch(`${API_URL}/config`, { 
-            method: 'PUT', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ pin: currentPassword }) 
-        });
-        
+        await fetch(`${API_URL}/config`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: currentPassword }) });
         addLog("Admin Password Changed", "SUCCESS", "admin"); 
-        alert("Password Updated!"); 
-        closePasswordModal();
+        alert("Password Updated!"); closePasswordModal();
     } else {
-        addLog("Failed Password Update Attempt", "SECURITY ALERT", "admin");
-        alert("Incorrect Old Password.");
+        addLog("Failed Password Update Attempt", "SECURITY ALERT", "admin"); alert("Incorrect Old Password.");
     }
 }
 
-// --- MODAL CONTROLS ---
 function closeAlert() { document.getElementById('security-alert').classList.add('hidden'); }
 function openPasswordModal() { document.getElementById('password-modal').classList.remove('hidden'); }
 function closePasswordModal() { document.getElementById('password-modal').classList.add('hidden'); }
@@ -818,21 +950,9 @@ function handleLoginEnter(e) { if(e.key === 'Enter') checkAdminLogin(); }
 function handleAddItemEnter(e) { if(e.key === 'Enter') addNewItem(); }
 function handleUpdatePasswordEnter(e) { if(e.key === 'Enter') { e.preventDefault(); saveNewPassword(); } }
 
-// --- SCROLL TO TOP UTILITY ---
 window.onscroll = function() { toggleScrollButton() };
-
 function toggleScrollButton() {
     const btn = document.getElementById("scroll-top-btn");
-    if (document.body.scrollTop > 200 || document.documentElement.scrollTop > 200) {
-        btn.style.display = "block";
-    } else {
-        btn.style.display = "none";
-    }
+    btn.style.display = (document.body.scrollTop > 200 || document.documentElement.scrollTop > 200) ? "block" : "none";
 }
-
-function scrollToTop() {
-    window.scrollTo({
-        top: 0,
-        behavior: 'smooth' 
-    });
-}
+function scrollToTop() { window.scrollTo({ top: 0, behavior: 'smooth' }); }

@@ -49,6 +49,7 @@
             </div>
             <nav class="sidebar-nav">
                 <a href="#" class="nav-item active" id="nav-home" onclick="switchNav('home')"><span>⌂</span> Home</a>
+                <a href="#" class="nav-item" id="nav-maintenance" onclick="switchNav('maintenance')"><span>🔧</span> Maintenance</a>
                 <a href="#" class="nav-item" id="nav-charts" onclick="switchNav('charts')"><span>📊</span> Charts</a>
             </nav>
             <div class="sidebar-footer">
@@ -142,7 +143,6 @@
                                 <button onclick="filterByStatus('Available')" class="pill">Available</button>
                                 <button id="btn-filter-pending" onclick="filterByStatus('Pending Approval')" class="pill admin-only hidden">Pending</button>
                                 <button id="btn-filter-borrowed" onclick="filterByStatus('Borrowed')" class="pill admin-only hidden">Borrowed</button>
-                                <button id="btn-filter-maintenance" onclick="filterByStatus('Maintenance')" class="pill admin-only hidden">Maintenance</button>
                             </div>
                         </div>
                         <p id="admin-hint" style="font-size: 0.75rem; color: #64748b; margin-bottom: 15px;" class="admin-only hidden">Admin click the 3DES value to instantly decrypt the serial.</p>
@@ -166,8 +166,7 @@
                                         <th style="padding: 12px 15px;">Status</th>
                                     </tr>
                                 </thead>
-                                <tbody id="student-history-list">
-                                    </tbody>
+                                <tbody id="student-history-list"></tbody>
                             </table>
                         </div>
                     </div>
@@ -181,7 +180,36 @@
                             <div style="color: #64748b;"> Initializing Secure Environment </div>
                         </div>
                     </div>
-                </div> <div id="view-charts" class="hidden">
+                </div> <div id="view-maintenance" class="hidden">
+                    <div class="metrics-grid admin-only hidden" style="margin-bottom: 20px;">
+                        <div class="metric-card">
+                            <div class="metric-value" id="stat-maint-total">0</div>
+                            <div class="metric-label">ITEMS UNDER REPAIR</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="stat-maint-cost" style="color:#ef4444;">₱0</div>
+                            <div class="metric-label">TOTAL REPAIR COST</div>
+                        </div>
+                    </div>
+
+                    <div class="card table-card">
+                        <div class="table-tools">
+                            <h2 class="card-header section-title" style="margin: 0; color: var(--cit-blue);">Maintenance & Repair Tracker 🔧</h2>
+                        </div>
+                        <p style="font-size: 0.85rem; color: #64748b; margin-bottom: 20px;">Track items that are broken, damaged, or currently out for repair.</p>
+                        
+                        <div class="table-responsive">
+                            <table id="maintenance-table" style="width: 100%; text-align: left; border-collapse: collapse;">
+                                <thead>
+                                    </thead>
+                                <tbody id="maintenance-list"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+
+                <div id="view-charts" class="hidden">
                     <div style="display: flex; gap: 20px; flex-wrap: wrap;">
                         <div class="card table-card" style="flex: 1; min-width: 350px;">
                             <h2 class="card-header section-title" style="margin: 0; color: var(--cit-blue); margin-bottom: 10px;">Category Distribution</h2>
@@ -190,7 +218,6 @@
                                 <canvas id="categoryChart"></canvas>
                             </div>
                         </div>
-
                         <div class="card table-card" style="flex: 1; min-width: 350px;">
                             <h2 class="card-header section-title" style="margin: 0; color: var(--cit-blue); margin-bottom: 10px;">Most Borrowed Equipment</h2>
                             <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 20px;">Top 5 items based on historical borrow frequency.</p>
@@ -236,6 +263,69 @@
             <div style="display:flex; gap:10px; justify-content:center; margin-top:20px;">
                 <button class="btn-primary" style="flex: 1;" onclick="confirmBorrow()">Submit Request</button>
                 <button class="btn-danger" style="flex: 1;" onclick="closeBorrowModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="report-modal" class="overlay hidden">
+        <div class="modal-card">
+            <h2 style="color: #ef4444;">Report Broken Equipment</h2>
+            <p style="margin-bottom: 10px; font-size: 0.9rem; color: #64748b;">Please describe what is wrong with this item.</p>
+            
+            <div id="report-serial-container" class="hidden" style="margin-bottom: 15px;">
+                <label style="font-weight: bold; font-size: 0.85rem;">Select Specific Item (Serial Number):</label>
+                <select id="report-serial-select" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border); margin-top: 5px;"></select>
+            </div>
+
+            <textarea id="report-issue-desc" placeholder="e.g. The screen is cracked and won't turn on..." style="width: 100%; height: 100px; padding: 10px; border-radius: 8px; border: 1px solid var(--border); font-family: inherit; resize: none;"></textarea>
+            
+            <div style="display:flex; gap:10px; justify-content:center; margin-top:20px;">
+                <button class="btn-primary" style="flex: 1; background: #ef4444;" onclick="submitBrokenReport()">Submit Report</button>
+                <button class="btn-danger" style="flex: 1; background: #64748b;" onclick="closeReportModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="edit-maintenance-modal" class="overlay hidden">
+        <div class="modal-card" style="max-width: 500px;">
+            <h2 style="color: #003366; margin-bottom: 5px;">Update Repair Record</h2>
+            <p id="edit-maint-eq-name" style="color: #64748b; font-weight: bold; margin-bottom: 15px; font-size: 0.9rem;"></p>
+            
+            <div class="form-group" style="margin-bottom: 10px;">
+                <label style="font-size: 0.85rem; font-weight: 600;">Repair Status</label>
+                <select id="maint-status" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border);">
+                    <option value="Pending">Pending (Awaiting Inspection)</option>
+                    <option value="Diagnosed">Diagnosed (Issue Identified)</option>
+                    <option value="Sent for Repair">Sent for Repair</option>
+                    <option value="Repairing">Repairing</option>
+                    <option value="Fixed">Fixed (Ready to Return to Vault)</option>
+                </select>
+            </div>
+
+            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                <div class="form-group" style="flex: 1;">
+                    <label style="font-size: 0.85rem; font-weight: 600;">Sent To (Technician)</label>
+                    <input type="text" id="maint-sent-to" placeholder="e.g. IT Department" style="padding: 10px;">
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label style="font-size: 0.85rem; font-weight: 600;">Repair Cost (₱)</label>
+                    <input type="number" id="maint-cost" placeholder="e.g. 500" style="padding: 10px;">
+                </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 10px;">
+                <label style="font-size: 0.85rem; font-weight: 600;">Estimated Return Date</label>
+                <input type="date" id="maint-return-date" style="padding: 10px; width: 100%;">
+            </div>
+
+            <div class="form-group" style="margin-bottom: 15px;">
+                <label style="font-size: 0.85rem; font-weight: 600;">Maintenance Notes</label>
+                <textarea id="maint-notes" placeholder="Additional details..." style="width: 100%; height: 60px; padding: 10px; border-radius: 8px; border: 1px solid var(--border); font-family: inherit; resize: none;"></textarea>
+            </div>
+
+            <div style="display:flex; gap:10px; justify-content:center;">
+                <button class="btn-primary" style="flex: 1;" onclick="saveMaintenanceUpdate()">Save Updates</button>
+                <button class="btn-danger" style="flex: 1;" onclick="closeEditMaintModal()">Cancel</button>
             </div>
         </div>
     </div>

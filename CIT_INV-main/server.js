@@ -25,11 +25,21 @@ const Item = mongoose.model('Item', new mongoose.Schema({
     category: String, 
     description: String,
     price: Number,
-    serials: [String], // Array to hold grouped serials
+    serials: [String], 
     status: String,
     borrower: String,
-    returnDate: String
+    returnDate: String,
+    
+    // NEW: Asset Maintenance & Repair Fields
+    issueDescription: String,
+    reportedBy: String,
+    dateReported: String,
+    repairStatus: String,
+    sentTo: String,
+    repairCost: Number,
+    maintenanceNotes: String
 }));
+
 const Log = mongoose.model('Log', new mongoose.Schema({
     action: String,
     status: String,
