@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UA | CIT Secure Inventory</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <div id="landing-container" class="wrapper">
+        <div class="card login-card">
+            <img src="ua.jpg" alt="University Logo" class="main-logo" onerror="this.style.display='none'">
+            <h1>CIT Laboratory</h1>
+            <p class="tagline">Triple DES Secure Vault</p>
+            <hr>
+            
+            <div id="portal-selection">
+                <p class="instruction-text" style="color: #64748b; margin-bottom: 20px;">Select your access level to continue:</p>
+                <button onclick="showAdminPortal()" class="btn-primary login-btn">Administrator Portal</button>
+                <button onclick="showStudentPortal()" class="btn-secondary login-btn">Student Portal</button>
+            </div>
+
+            <div id="admin-login-screen" class="hidden">
+                <h3 class="auth-title" style="color: #003366;">Admin Authentication</h3>
+                <p id="lockout-timer" class="error-text" style="color: #ef4444; font-size: 0.8rem;"></p>
+                <input type="password" id="password-input" placeholder="Enter Admin Password" onkeydown="handleLoginEnter(event)">
+                <button onclick="checkAdminLogin()" class="btn-primary login-btn" id="btn-admin-login">Verify Identity</button>
+                <button onclick="returnToLanding()" class="btn-text">← Back</button>
+            </div>
+
+            <div id="student-login-screen" class="hidden">
+                <h3 class="auth-title" style="color: #003366;">Student Authentication</h3>
+                <input type="text" id="student-name" placeholder="Full Name">
+                <input type="text" id="student-id" placeholder="Student ID" onkeydown="if(event.key === 'Enter') checkStudentLogin()">
+                <button onclick="checkStudentLogin()" class="btn-primary login-btn">Access Vault</button>
+                <button onclick="returnToLanding()" class="btn-text">← Back</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="dashboard" class="dashboard-layout hidden">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo-icon">UA</div>
+                <h2>CIT.Vault</h2>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active"><span>⌂</span> Home</a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="btn-update-password" class="btn-sidebar admin-only hidden" onclick="openPasswordModal()">⚙️ Settings</button>
+                <button class="btn-logout" onclick="logoutSession()">Log out</button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="top-bar">
+                <div class="search-wrapper">
+                    <input type="text" id="search-input" placeholder="Search equipment..." onkeyup="handleSearch()">
+                </div>
+                <div class="user-pill">
+                    <div id="user-greeting"></div>
+                </div>
+            </header>
+
+            <div class="scroll-content">
+                <div id="admin-analytics" class="admin-only hidden">
+                    <h2 class="page-header">Recent activity</h2>
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-value" id="stat-total">0</div>
+                            <div class="metric-label">TOTAL EQUIPMENT</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="stat-borrowed" style="color:#f59e0b;">0</div>
+                            <div class="metric-label">BORROWED</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="stat-pending" style="color:#6366f1;">0</div>
+                            <div class="metric-label">PENDING</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="stat-penalties" style="color:#ef4444;">₱0</div>
+                            <div class="metric-label">OVERDUE FEES</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="admin-controls" class="card admin-only hidden">
+                    <h2 class="card-header" style="margin-bottom: 25px; color: var(--cit-blue);">Add product</h2>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Name*</label>
+                            <input type="text" id="item-name" placeholder="Equipment Name">
+                        </div>
+                        <div class="form-group">
+                            <label>Item code (Serial)*</label>
+                            <input type="text" id="item-serial" placeholder="Serial Number">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Description*</label>
+                            <input type="text" id="item-description" placeholder="Product Description">
+                        </div>
+                        <div class="form-group">
+                            <label>Price (₱)*</label>
+                            <input type="number" id="item-price" placeholder="e.g. 1500">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Category*</label>
+                            <select id="item-category" style="width: 100%; padding: 14px 20px; border-radius: 10px; border: 1px solid var(--border); background: #f8fafc; font-family: inherit; font-size: 0.9rem; color: var(--text-main); appearance: auto;">
+                                <option value="End-User Devices">End-User Devices</option>
+                                <option value="Infrastructure">Infrastructure</option>
+                                <option value="Networking">Networking</option>
+                                <option value="Peripherals">Peripherals</option>
+                                <option value="AV Equipment">AV Equipment</option>
+                                <option value="Others">Others</option>
+                            </select>
+                        </div>
+                        <div class="form-group"></div>
+                    </div>
+                    <div class="form-group" style="margin-top: 25px;">
+                         <button onclick="addNewItem()" class="btn-save">Save product</button>
+                    </div>
+                </div>
+
+                <div id="vault-section" class="card table-card">
+                    <div class="table-tools">
+                        <h2 class="card-header section-title" style="margin: 0; color: var(--cit-blue);">Secure Vault (3DES Protected)</h2>
+                        <div class="filter-pills">
+                            <button onclick="filterByStatus('All')" class="pill active">All</button>
+                            <button onclick="filterByStatus('Available')" class="pill">Available</button>
+                            <button id="btn-filter-pending" onclick="filterByStatus('Pending Approval')" class="pill admin-only hidden">Pending</button>
+                            <button id="btn-filter-borrowed" onclick="filterByStatus('Borrowed')" class="pill admin-only hidden">Borrowed</button>
+                            <button id="btn-filter-maintenance" onclick="filterByStatus('Maintenance')" class="pill admin-only hidden">Maintenance</button>
+                        </div>
+                    </div>
+                    <p id="admin-hint" style="font-size: 0.75rem; color: #64748b; margin-bottom: 15px;" class="admin-only hidden">Admin click the 3DES value to instantly decrypt the serial.</p>
+                    
+                    <div class="table-responsive">
+                        <table id="vault-table">
+                            <thead></thead>
+                            <tbody id="inventory-list"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="audit-log-container" class="card admin-only hidden" style="border-left: 5px solid #003366;">
+                    <h2 class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                        Security Audit Log
+                        <span style="font-size: 0.7rem; color: #10b981; background: #d1fae5; padding: 4px 10px; border-radius: 12px; font-weight: bold;">Live Monitoring</span>
+                    </h2>
+                    <div id="audit-list" class="log-viewer">
+                        <div style="color: #64748b;"> Initializing Secure Environment </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div id="encryption-visualizer" class="overlay hidden">
+        <div class="viz-box">
+            <div class="loader"></div>
+            <h2 style="color:#3b82f6;">3DES Encryption Phase</h2>
+            <div id="step-1" class="viz-step">Phase 1: Initializing K1</div>
+            <div id="step-2" class="viz-step">Phase 2: Applying K2 Inverse</div>
+            <div id="step-3" class="viz-step">Phase 3: Finalizing K3</div>
+            <div id="viz-result" class="viz-data">Processing...</div>
+        </div>
+    </div>
+
+    <div id="password-modal" class="overlay hidden">
+        <div class="modal-card">
+            <h2 style="color: #003366;">Update Password</h2>
+            <input type="password" id="old-password-field" placeholder="Old Password" style="margin-bottom: 15px;">
+            <input type="password" id="new-password-field" placeholder="New Password" onkeydown="handleUpdatePasswordEnter(event)">
+            <div style="display:flex; gap:10px; justify-content:center; margin-top:20px;">
+                <button class="btn-primary" style="flex: 1;" onclick="saveNewPassword()">Update</button>
+                <button class="btn-danger" style="flex: 1;" onclick="closePasswordModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="borrow-modal" class="overlay hidden">
+        <div class="modal-card">
+            <h2 style="color: #003366;">Borrow Request</h2>
+            <p style="margin-bottom: 10px; font-weight: bold; color: #64748b;">When will you return this?</p>
+            <input type="date" id="return-date-field" style="width: 100%;">
+            <div style="display:flex; gap:10px; justify-content:center; margin-top:20px;">
+                <button class="btn-primary" style="flex: 1;" onclick="confirmBorrow()">Submit Request</button>
+                <button class="btn-danger" style="flex: 1;" onclick="closeBorrowModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <button id="scroll-top-btn" onclick="scrollToTop()" title="Go to top">↑</button>
+    <script src="script.js"></script>
+</body>
+</html>
